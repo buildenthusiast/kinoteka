@@ -1,0 +1,18 @@
+{
+ "version": "0.2.0",
+ "notes": "Първа версия с автоматично обновяване",
+ "files": {
+  "lib/intro.js": "c6c927630f7bb612032fc290c26e240f05d57c93d1f40cf4117056f7ccd09cb6",
+  "lib/media.js": "713e30c18a26beb07d0f966bb430a8a24785e4d6f5be8777340e0c5728f3d0f8",
+  "lib/opensubs.js": "b1992ab8b9993242fa051fd8f578b748351da47bafd11b9cdd2bbc0920717768",
+  "lib/scanner.js": "7d87470b6b2f2466ef80e1aee86d498724824cccde9172a173ce79e4052a9527",
+  "lib/tmdb.js": "587b3f2617b84263f3f1d7e5f40a0c00b008db72330d84443f00e7f28ca13651",
+  "lib/updater.js": "35395b02d2fbc63d37f6e2bb9650f90f70a86740cb43bd1ab301cd838709c77b",
+  "main.js": "65259f2919b6ccf506a73c2e86769e74b4211f942be76e74c39437740eb8492b",
+  "package.json": "b3a7026192767afce22a5892d09738753a8619ef96300ee376ef5b1edd9cc6e4",
+  "preload.js": "785ed89d08160ed139c998d2db1e8810e6c02ea7e1f2f09ac1035bec9455a52d",
+  "renderer/app.js": "10bc28b9bb1d5e3ab0bd58acb57a804a568eb52a6614af16251be7764712d7fe",
+  "renderer/index.html": "f987e9e3c56631d214dbd18dbff95bd42ad2c10f549da5d3b5562d57da45c0b2",
+  "renderer/style.css": "c0532af97396d7cc41cbfea8f36bec2fbf02c40db5473145f20949be2b1b4c5a"
+ }
+}

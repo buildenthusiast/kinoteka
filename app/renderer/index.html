@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: http://127.0.0.1:*; media-src http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Кинотека</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="nav">
+    <div class="logo"><span class="logo-mark">▶</span> Кинотека</div>
+    <button data-view="home" class="nav-btn active">🏠 Начало</button>
+    <button data-view="movies" class="nav-btn">🎬 Филми</button>
+    <button data-view="series" class="nav-btn">📺 Сериали</button>
+    <button data-view="favs" class="nav-btn">♥ Любими</button>
+    <button data-view="watch" class="nav-btn">🕒 За гледане</button>
+    <div class="nav-sep"></div>
+    <button id="rand-ep" class="nav-btn rand" title="Пуска случаен епизод от всички сериали и продължава със случайни">🎲 Случаен епизод</button>
+    <button id="rand-movie" class="nav-btn rand" title="Пуска случаен филм (първо негледаните)">🎲 Случаен филм</button>
+    <div class="nav-sep"></div>
+    <button data-view="stats" class="nav-btn">📊 Статистика</button>
+    <button data-view="settings" class="nav-btn">⚙️ Настройки</button>
+    <div class="nav-spacer"></div>
+    <div id="scan-status"></div>
+    <button id="add-folder" class="primary">＋ Добави папка</button>
+  </aside>
+  <main id="main">
+    <header id="top">
+      <input id="search" type="search" placeholder="Търси филм или сериал…" autocomplete="off">
+      <select id="sort">
+        <option value="added">Последно добавени</option>
+        <option value="title">По име (А–Я)</option>
+        <option value="year">По година</option>
+        <option value="rating">По рейтинг</option>
+      </select>
+      <select id="f-genre" title="Жанр"><option value="">Всички жанрове</option></select>
+      <select id="f-year" title="Година">
+        <option value="">Всички години</option><option value="2020">2020-те</option><option value="2010">2010-те</option><option value="2000">2000-те</option>
+        <option value="1990">1990-те</option><option value="1980">1980-те</option><option value="0">По-стари</option>
+      </select>
+      <select id="f-rating" title="Рейтинг">
+        <option value="">Всеки рейтинг</option><option value="8">★ 8+</option><option value="7">★ 7+</option><option value="6">★ 6+</option>
+      </select>
+      <button id="f-random" title="Случаен от показаните (с филтрите)">🎲 Случаен оттук</button>
+    </header>
+    <section id="view"></section>
+  </main>
+</div>
+
+<div id="player" class="hidden">
+  <video id="video" preload="auto"></video>
+  <div id="subtitle"></div>
+  <div id="spinner" class="hidden"></div>
+  <div id="p-top">
+    <button id="p-back" title="Назад (Esc)">←</button>
+    <div id="p-title"></div>
+  </div>
+  <button id="p-skip" class="hidden">Пропусни интрото ⏭</button>
+  <div id="p-sleep-msg" class="hidden"></div>
+  <div id="p-next" class="hidden"><div id="p-next-label"></div><button id="p-next-btn">Пусни ▶</button><button id="p-next-cancel">Отказ</button></div>
+  <div id="p-controls">
+    <div id="p-seek"><div id="p-buffer"></div><div id="p-played"></div><div id="p-handle"></div><div id="p-hover-time"></div></div>
+    <div id="p-row">
+      <button id="p-play" title="Пусни/Пауза (Space)">▶</button>
+      <button id="p-rew" title="-10 сек (←)">⟲10</button>
+      <button id="p-fwd" title="+10 сек (→)">10⟳</button>
+      <button id="p-mute" title="Звук (M)">🔊</button>
+      <input id="p-vol" type="range" min="0" max="1" step="0.02" value="1">
+      <div id="p-time">0:00 / 0:00</div>
+      <div class="grow"></div>
+      <button id="p-shuffle" class="hidden" title="Друг случаен (R)">🎲</button>
+      <button id="p-nextep" class="hidden" title="Следващ (N)">⏭</button>
+      <div class="menu-wrap"><button id="p-audio-btn" title="Аудио">🎧 Аудио</button><div id="p-audio" class="menu hidden"></div></div>
+      <div class="menu-wrap"><button id="p-subs-btn" title="Субтитри (S)">💬 Субтитри</button><div id="p-subs" class="menu hidden"></div></div>
+      <div class="menu-wrap"><button id="p-sleep-btn" title="Таймер за сън">🌙</button><div id="p-sleep" class="menu hidden"></div></div>
+      <button id="p-fs" title="Цял екран (F)">⛶</button>
+    </div>
+  </div>
+</div>
+<div id="toast" class="hidden"></div>
+<div id="update-bar" class="hidden"><span id="update-text"></span><button id="update-restart" class="primary">Рестартирай сега</button><button id="update-later">По-късно</button></div>
+<script src="app.js"></script>
+</body>
+</html>
