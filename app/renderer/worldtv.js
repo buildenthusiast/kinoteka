@@ -85,7 +85,7 @@ function renderWtv() {
       <button data-wtv-act="reload" title="Изтегли списъка наново">⟳ Обнови</button>
     </div>
     <div class="hint">Публичен списък с безплатни канали (iptv-org), обновен ${esc(when)}. Каналите са от външни сървъри — някои може да не работят, да са спрени в България или да вървят само в определени часове.
-      В плейъра: <b>Page Up / Page Down</b> — друг канал, <b>L</b> — списък с каналите, <b>F</b> — цял екран, <b>Esc</b> — назад.</div>
+      В плейъра: <b>Page Up / Page Down</b> — друг канал, <b>L</b> — списък с каналите, <b>F</b> — цял екран, <b>Esc</b> или <b>←</b> — смалява канала в ъгъла, за да разглеждаш менюто, без да спира.</div>
     <div id="wtv-grid">${wtvGridHtml()}</div></div>`;
 }
 
@@ -132,8 +132,9 @@ async function wtvOpen(i) {
   const ch = W.list[i];
   W.cur = i; W.token++;
   const tok = W.token;
-  $('#wtv-player').classList.remove('hidden');
+  $('#wtv-player').classList.remove('hidden', 'mini');
   $('#wtv-title').textContent = ch.name;
+  $('#wtv-mini-title').textContent = ch.name;
   $('#wtv-sub').textContent = [wtvCountry(ch.country), ch.groups.map(wtvCat).join(', '), ch.quality].filter(Boolean).join(' · ');
   $('#wtv-fav').textContent = favs().has(ch.url) ? '★' : '☆';
   $('#wtv-logo').innerHTML = ch.logo ? `<img src="${esc(ch.logo)}" referrerpolicy="no-referrer" data-fallback="remove">` : '';
@@ -146,6 +147,7 @@ async function wtvOpen(i) {
   const isHls = /\.m3u8?(\?|#|$)/i.test(ch.url) || !/\.(mp4|webm|mkv|ts|mp3|aac)(\?|#|$)/i.test(ch.url);
   W.stages = [...(isHls && window.Hls && Hls.isSupported() ? ['hls'] : []), 'direct', ...(W.liveUrl ? ['ffmpeg'] : [])];
   W.stage = -1;
+  wtvAdUI();
   wtvNextStage(tok);
   if (!$('#wtv-side').classList.contains('hidden')) wtvSideList();
 }
@@ -165,7 +167,7 @@ function wtvNextStage(tok, why) {
   wtvMsg(how === 'ffmpeg' ? '<div>Пробвам през ffmpeg (по-бавно тръгва)…</div>' : '');
   W.timer = setTimeout(() => wtvNextStage(tok, 'Няма картина след дълго чакане.'), how === 'ffmpeg' ? 30000 : 15000);
   if (how === 'hls') {
-    const hls = new Hls({ enableWorker: false, lowLatencyMode: false, backBufferLength: 30, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 2, fragLoadingMaxRetry: 3 });
+    const hls = new Hls({ ...(wtvAdOn() ? { pLoader: adLoaderClass() } : {}), enableWorker: false, lowLatencyMode: false, backBufferLength: 30, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 2, fragLoadingMaxRetry: 3 });
     W.hls = hls;
     let recovered = false;
     hls.on(Hls.Events.MANIFEST_PARSED, () => { wv.play().catch(() => {}); });
@@ -188,6 +190,51 @@ function wtvNextStage(tok, why) {
   }
 }
 
+// ---- блокиране на рекламите ------------------------------------------------
+// Много безплатни канали вмъкват реклами в самия поток (SSAI). Където потокът ги отбелязва
+// (EXT-X-CUE-OUT/IN, SCTE-35) или идват от рекламни сървъри, сегментите се маркират като GAP —
+// hls.js не ги тегли и не ги показва. Рекламите на живо не могат да се „превъртят“: каналът
+// просто изчаква (без реклама) да продължи програмата.
+const AD_URL = /(doubleclick\.net|googlesyndication|imasdk|dai\.google|fwmrm\.net|freewheel|springserve|innovid|tremorhub|spotx|adsrvr|unicornmedia|\/ads?\/|adbreak|ad_break|\/creatives?\/|[_\-/]ads?[_\-]\d|\/vast\/)/i;
+function stripAds(text) {
+  if (!text.includes('#EXTINF')) return { text, n: 0 };
+  const out = [];
+  let inAd = false, n = 0, block = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim();
+    if (/^#EXT-X-CUE-OUT(?!-CONT)/i.test(l) || (/^#EXT-X-DATERANGE/i.test(l) && /SCTE35-OUT/i.test(l)) || /^#EXT-X-SCTE35:.*CUE-OUT/i.test(l)) inAd = true;
+    if (/^#EXT-X-CUE-OUT-CONT/i.test(l)) inAd = true;
+    if (/^#EXT-X-CUE-IN/i.test(l) || (/^#EXT-X-DATERANGE/i.test(l) && /SCTE35-IN/i.test(l))) inAd = false;
+    if (!l || l.startsWith('#')) { (block.length || l.startsWith('#EXTINF') || /^#EXT-X-(BYTERANGE|DISCONTINUITY|PROGRAM-DATE-TIME|KEY|MAP|GAP|BITRATE)/i.test(l) ? block : out).push(raw); continue; }
+    // ред с адрес на сегмент
+    if ((inAd || AD_URL.test(l)) && !block.some(b => /^#EXT-X-GAP/i.test(b))) { block.push('#EXT-X-GAP'); n++; }
+    out.push(...block, raw); block = [];
+  }
+  out.push(...block);
+  return { text: out.join('\n'), n };
+}
+function adLoaderClass() {
+  const Base = Hls.DefaultConfig.loader;
+  return class extends Base {
+    load(context, config, callbacks) {
+      const ok = callbacks.onSuccess;
+      super.load(context, config, { ...callbacks, onSuccess: (resp, stats, ctx, net) => {
+        if (typeof resp.data === 'string') {
+          const r = stripAds(resp.data);
+          if (r.n) { resp.data = r.text; wtvAdsSeen(r.n); }
+        }
+        ok(resp, stats, ctx, net);
+      } });
+    }
+  };
+}
+const wtvAdOn = () => lib.settings.wtvAdblock !== false;
+function wtvAdsSeen() {
+  W.adNow = Date.now();
+  const b = $('#wtv-ad'); b.classList.add('hit'); b.title = 'Блокирах реклами в този канал. Натисни, за да ги изключиш/включиш.';
+}
+function wtvAdUI() { const b = $('#wtv-ad'); b.textContent = wtvAdOn() ? '🛡 Без реклами' : '🛡 Реклами: да'; b.classList.toggle('off', !wtvAdOn()); b.classList.remove('hit'); }
+
 wv.addEventListener('playing', () => { clearTimeout(W.timer); wtvSpin(false); wtvMsg(''); wtvUpdateUI(); });
 wv.addEventListener('waiting', () => wtvSpin(true));
 wv.addEventListener('pause', wtvUpdateUI);
@@ -197,7 +244,19 @@ wv.addEventListener('error', () => {
   wtvNextStage(W.token, 'Форматът не се поддържа.');
 });
 
+// смаляване в ъгъла: каналът продължава, докато разглеждаш менюто, и спира чак когато пуснеш нещо друго
+function wtvMinimize() {
+  if (isFs) window.api.fullscreen(false);
+  $('#wtv-side').classList.add('hidden'); $('#wtv-pq').blur();
+  $('#wtv-player').classList.add('mini');
+  $('#wtv-player').classList.remove('idle');
+  if (view.name === 'wtv') wtvUpdateGrid();
+}
+function wtvExpand() { $('#wtv-player').classList.remove('mini'); wtvShowControls(); }
+const wtvActive = () => !$('#wtv-player').classList.contains('hidden');
+
 function wtvClose() {
+  $('#wtv-player').classList.remove('mini');
   W.token++;
   wtvStopMedia();
   window.api.wtvPlay(null);
@@ -209,7 +268,7 @@ function wtvClose() {
 
 function wtvUpdateUI() {
   $('#wtv-play').textContent = wv.paused ? '▶' : '❚❚';
-  $('#wtv-mute').textContent = wv.muted || wv.volume === 0 ? '🔇' : '🔊';
+  $('#wtv-mute').textContent = $('#wtv-mute2').textContent = wv.muted || wv.volume === 0 ? '🔇' : '🔊';
   $('#wtv-vol').value = wv.muted ? 0 : wv.volume;
 }
 
@@ -234,7 +293,11 @@ $('#wtv-player').addEventListener('click', async (ev) => {
   if (!t) return;
   if (t.dataset.wtvPI !== undefined) return wtvOpen(+t.dataset.wtvPI);
   const a = t.dataset.wtvP || t.id;
-  if (a === 'wtv-back') wtvClose();
+  if (a === 'wtv-back') wtvMinimize();
+  else if (a === 'wtv-close' || a === 'wtv-close2') wtvClose();
+  else if (a === 'wtv-expand') wtvExpand();
+  else if (a === 'wtv-ad') { lib.settings = await window.api.setSettings({ wtvAdblock: !wtvAdOn() }); toast(wtvAdOn() ? 'Блокирането на реклами е включено.' : 'Блокирането на реклами е изключено.'); wtvOpen(W.cur); }
+  else if (a === 'wtv-mute2') { wv.muted = !wv.muted; if (!wv.muted && wv.volume === 0) wv.volume = 0.5; }
   else if (a === 'wtv-play') wv.paused ? wv.play().catch(() => {}) : wv.pause();
   else if (a === 'wtv-prev') wtvOpen(W.cur - 1);
   else if (a === 'wtv-next' || a === 'next') wtvOpen(W.cur + 1);
@@ -245,20 +308,26 @@ $('#wtv-player').addEventListener('click', async (ev) => {
   else if (a === 'wtv-fav') { const on = await wtvToggleFav(W.list[W.cur]); t.textContent = on ? '★' : '☆'; toast(on ? 'Добавен в любими.' : 'Махнат от любими.'); }
 });
 $('#wtv-vol').addEventListener('input', (e) => { wv.volume = +e.target.value; wv.muted = wv.volume === 0; });
-wv.addEventListener('dblclick', () => window.api.fullscreen());
-wv.addEventListener('click', () => { wv.paused ? wv.play().catch(() => {}) : wv.pause(); });
+wv.addEventListener('dblclick', () => { if (!$('#wtv-player').classList.contains('mini')) window.api.fullscreen(); });
+wv.addEventListener('click', () => {
+  if ($('#wtv-player').classList.contains('mini')) return wtvExpand();
+  wv.paused ? wv.play().catch(() => {}) : wv.pause();
+});
+// пускаш филм, сериал или радио — телевизията спира
+$('#video').addEventListener('play', () => { if (wtvActive()) wtvClose(); });
+{ const ra = $('#radio-audio'); if (ra) ra.addEventListener('play', () => { if (wtvActive()) wtvClose(); }); }
 
 let wtvIdleT;
 function wtvShowControls() {
   const p = $('#wtv-player');
   p.classList.remove('idle');
   clearTimeout(wtvIdleT);
-  wtvIdleT = setTimeout(() => { if (!wv.paused && $('#wtv-side').classList.contains('hidden')) p.classList.add('idle'); }, 2800);
+  wtvIdleT = setTimeout(() => { if (!p.classList.contains('mini') && !wv.paused && $('#wtv-side').classList.contains('hidden')) p.classList.add('idle'); }, 2800);
 }
 $('#wtv-player').addEventListener('mousemove', wtvShowControls);
 
 document.addEventListener('keydown', (e) => {
-  if ($('#wtv-player').classList.contains('hidden')) return;
+  if ($('#wtv-player').classList.contains('hidden') || $('#wtv-player').classList.contains('mini')) return;
   e.stopImmediatePropagation();
   if (e.target.id === 'wtv-pq' && !$('#wtv-side').classList.contains('hidden')) {
     if (e.key === 'Escape') wtvToggleSide();
@@ -275,7 +344,7 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'f' || k === 'ф') window.api.fullscreen();
   else if (k === 'm' || k === 'м') wv.muted = !wv.muted;
   else if (k === 'l' || k === 'л') wtvToggleSide();
-  else if (k === 'escape') { if (!$('#wtv-side').classList.contains('hidden')) wtvToggleSide(); else if (isFs) window.api.fullscreen(false); else wtvClose(); }
+  else if (k === 'escape') { if (!$('#wtv-side').classList.contains('hidden')) wtvToggleSide(); else if (isFs) window.api.fullscreen(false); else wtvMinimize(); }
   else return;
   e.preventDefault(); wtvShowControls();
 }, true);
