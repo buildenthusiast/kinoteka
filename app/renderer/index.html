@@ -2,7 +2,7 @@
 <html lang="bg">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: http://127.0.0.1:*; media-src http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: http: https:; media-src http: https: blob:; connect-src 'self' http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <title>Кинотека</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -16,6 +16,7 @@
     <button data-view="favs" class="nav-btn">♥ Любими</button>
     <button data-view="watch" class="nav-btn">🕒 За гледане</button>
     <button data-view="tv" class="nav-btn">📡 Телевизия</button>
+    <button data-view="wtv" class="nav-btn">🌍 World TV</button>
     <div class="nav-sep"></div>
     <button id="rand-ep" class="nav-btn rand" title="Пуска случаен епизод от всички сериали и продължава със случайни">🎲 Случаен епизод</button>
     <button id="rand-movie" class="nav-btn rand" title="Пуска случаен филм (първо негледаните)">🎲 Случаен филм</button>
@@ -79,8 +80,36 @@
     </div>
   </div>
 </div>
+<div id="wtv-player" class="hidden">
+  <video id="wtv-video" autoplay></video>
+  <div id="wtv-spinner" class="hidden"></div>
+  <div id="wtv-msg" class="hidden"></div>
+  <div id="wtv-top">
+    <button id="wtv-back" title="Назад (Esc)">←</button>
+    <div id="wtv-logo"></div>
+    <div><div id="wtv-title"></div><div id="wtv-sub"></div></div>
+  </div>
+  <div id="wtv-side" class="hidden">
+    <input id="wtv-pq" type="search" placeholder="Търси канал…" autocomplete="off">
+    <div id="wtv-side-list"></div>
+  </div>
+  <div id="wtv-controls">
+    <button id="wtv-prev" title="Предишен канал (Page Up)">⏮</button>
+    <button id="wtv-play" title="Пусни/Пауза (Space)">❚❚</button>
+    <button id="wtv-next" title="Следващ канал (Page Down)">⏭</button>
+    <button id="wtv-mute" title="Звук (M)">🔊</button>
+    <input id="wtv-vol" type="range" min="0" max="1" step="0.02" value="1">
+    <span class="wtv-live">● НА ЖИВО</span>
+    <div class="grow"></div>
+    <button id="wtv-fav" title="Любим">☆</button>
+    <button id="wtv-list" title="Списък с канали (L)">☰ Канали</button>
+    <button id="wtv-fs" title="Цял екран (F)">⛶</button>
+  </div>
+</div>
 <div id="toast" class="hidden"></div>
 <div id="update-bar" class="hidden"><span id="update-text"></span><button id="update-restart" class="primary">Рестартирай сега</button><button id="update-later">По-късно</button></div>
 <script src="app.js"></script>
+<script src="hls.min.js"></script>
+<script src="worldtv.js"></script>
 </body>
 </html>

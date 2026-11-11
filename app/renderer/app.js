@@ -27,6 +27,7 @@ function toast(msg, ms = 3000) {
 async function refresh() {
   lib = await window.api.getLibrary();
   if (!$('#player').classList.contains('hidden')) return; // не пречим на плейъра
+  if (view.name === 'wtv' && $('#wtv-grid')) return;      // World TV не зависи от библиотеката — пазим търсачката
   render();
 }
 
@@ -152,7 +153,7 @@ function render() {
   v.innerHTML = ({ home: renderHome, movies: () => renderGrid('movies'), series: () => renderGrid('series'), detail: renderDetail, settings: renderSettings,
     favs: () => renderList('♥ Любими', byIds(lib.settings.favs), 'Натисни „♥ Любим“ в страницата на филм или сериал, за да го добавиш тук.'),
     watch: () => renderList('🕒 За гледане', byIds(lib.settings.watch), 'Натисни „🕒 За гледане“ в страницата на филм или сериал, за да го запазиш за по-късно.'),
-    stats: renderStats, tv: renderTv })[view.name]();
+    stats: renderStats, tv: renderTv, wtv: () => renderWtv() })[view.name]();
   v.dataset.view = view.name + JSON.stringify(view.param || '');
   if (keepScroll) v.scrollTop = st;
 }
@@ -318,7 +319,7 @@ function renderTv() {
 // ---------- събития ------------------------------------------------------
 document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('[data-view],[data-open],[data-play],[data-play-start],[data-action],[data-season],[data-season-done],[data-toggle-done],[data-show],[data-remove-folder],[data-ext],[data-random-series],[data-list],[data-dismiss],[data-goto],[data-tv],[data-tv-page],[data-tv-remove]');
-  if (!t || t.closest('#player')) return;
+  if (!t || t.id === 'view' || t.closest('#player')) return;   // #view носи data-view само за запомняне на изгледа
   const d = t.dataset;
   if (d.tvRemove) { ev.stopPropagation(); tvChannels = await window.api.tvRemove(d.tvRemove); return render(); }
   if (d.tvPage) { ev.stopPropagation(); return window.api.tvOpen({ id: d.tvPage, mode: 'page' }); }

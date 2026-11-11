@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const scanner = require('./lib/scanner');
@@ -9,6 +9,7 @@ const intro = require('./lib/intro');
 const opensubs = require('./lib/opensubs');
 const updater = require('./lib/updater');
 const tv = require('./lib/tv');
+const worldtv = require('./lib/worldtv');
 
 let win, server;
 const DATA = () => app.getPath('userData');
@@ -359,6 +360,48 @@ ipcMain.handle('tv:remove', (_e, id) => {
   return tvChannels();
 });
 
+// ---- World TV (iptv-org) -------------------------------------------------
+// Каналите се пускат в самата програма (hls.js). Много сървъри не пращат CORS заглавки
+// и искат определен Referer/User-Agent — затова ги добавяме за заявките на главния прозорец.
+let wtvCache = null, wtvHdr = null;
+ipcMain.handle('wtv:list', async (_e, force) => {
+  if (!wtvCache || force) {
+    const r = await worldtv.load(DATA(), !!force);
+    if (r.channels.length || !wtvCache) wtvCache = r;
+    else wtvCache = { ...wtvCache, error: r.error };
+  }
+  return wtvCache;
+});
+ipcMain.handle('wtv:play', (_e, ch) => {
+  wtvHdr = ch ? { referrer: worldtv.httpUrl(ch.referrer) || '', ua: String(ch.ua || '').slice(0, 300) } : null;
+  if (!ch) { server.stopAll(); return null; }
+  const u = worldtv.httpUrl(ch.url);
+  if (!u) return null;
+  const q = new URLSearchParams({ k: server.token, u, ref: wtvHdr.referrer, ua: wtvHdr.ua });
+  return { liveUrl: `${server.base}/live?${q}` };   // резервен път през ffmpeg
+});
+function setupWtvRequests() {
+  const isLocal = (u) => /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
+  const ours = (d) => win && !win.isDestroyed() && d.webContentsId === win.webContents.id && /^https?:/i.test(d.url) && !isLocal(d.url);
+  const filter = { urls: ['http://*/*', 'https://*/*'] };
+  session.defaultSession.webRequest.onBeforeSendHeaders(filter, (d, cb) => {
+    if (!ours(d) || !wtvHdr) return cb({});
+    const h = { ...d.requestHeaders };
+    if (wtvHdr.referrer) h.Referer = wtvHdr.referrer;
+    if (wtvHdr.ua) h['User-Agent'] = wtvHdr.ua;
+    cb({ requestHeaders: h });
+  });
+  session.defaultSession.webRequest.onHeadersReceived(filter, (d, cb) => {
+    if (!ours(d)) return cb({});
+    const h = {};
+    for (const [k, v] of Object.entries(d.responseHeaders || {})) if (!/^access-control-allow-/i.test(k)) h[k] = v;
+    h['Access-Control-Allow-Origin'] = ['*'];
+    h['Access-Control-Allow-Headers'] = ['*'];
+    h['Access-Control-Allow-Methods'] = ['GET, HEAD, OPTIONS'];
+    cb({ responseHeaders: h });
+  });
+}
+
 ipcMain.handle('win:fullscreen', (_e, v) => { win.setFullScreen(v === undefined ? !win.isFullScreen() : !!v); return win.isFullScreen(); });
 
 // ---- прозорец ----------------------------------------------------------
@@ -368,6 +411,7 @@ app.whenReady().then(async () => {
   load();
   server = await media.startServer({ resolveFile: (id) => index.files.get(id), resolveImage: imageFor });
   Menu.setApplicationMenu(null);
+  setupWtvRequests();
   win = new BrowserWindow({
     width: 1400, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0d0f14', title: 'Кинотека',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true }
