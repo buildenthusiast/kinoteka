@@ -12,7 +12,10 @@ const BUILTIN = [
   { id: 'bnt3', name: 'БНТ 3', group: 'БНТ', desc: 'Спорт', color: '#1d8a4e',
     page: 'https://tv.bnt.bg/bnt3/', embed: 'https://i.cdn.bg/live/OQ70Ds9Lcp' },
   { id: 'bnt4', name: 'БНТ 4', group: 'БНТ', desc: 'За българите по света', color: '#7a3fb0',
-    page: 'https://tv.bnt.bg/bnt4/', embed: 'https://i.cdn.bg/live/ls4wHAbTmY' }
+    page: 'https://tv.bnt.bg/bnt4/', embed: 'https://i.cdn.bg/live/ls4wHAbTmY' },
+  // Нова: само официалният сайт (секция „На живо“); може да иска вход и да е само за България
+  { id: 'nova', name: 'NOVA', group: 'Други', desc: 'Официалният сайт nova.bg — може да поиска вход', color: '#e4002b',
+    page: 'https://nova.bg/live' }
 ];
 
 const httpsOnly = (u) => { try { const x = new URL(String(u).trim()); return x.protocol === 'https:' ? x.href : null; } catch { return null; } };
