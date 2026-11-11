@@ -1,24 +1,26 @@
 {
- "version": "0.5.1",
- "notes": "World TV: мини-плейър в ъгъла и блокиране на реклами; махнат е старият раздел Телевизия",
+ "version": "0.6.0",
+ "notes": "Профили, програма на каналите, наскоро гледани, скриване на мъртвите канали, автоматични български субтитри и синхронизация",
  "files": {
+  "lib/epg.js": "6cda6b9f7100e8a99579e274982296f3408903cc8af7f0ff7f47a6376edb7270",
   "lib/intro.js": "c6c927630f7bb612032fc290c26e240f05d57c93d1f40cf4117056f7ccd09cb6",
   "lib/media.js": "8ceed2ff737c4e06e5bc5e011fe32c38183f87aac354927c88ce84ae48a9294c",
   "lib/opensubs.js": "b1992ab8b9993242fa051fd8f578b748351da47bafd11b9cdd2bbc0920717768",
   "lib/radio-stations.json": "029938305726560b4feb2acfe9ec5d057482d2966f052ebd61ebc23eaa6693cc",
   "lib/radio.js": "ae098aba540b0f971ccb88f5698b53fe61cc488e063b800a4e31c7f2d9c79c17",
   "lib/scanner.js": "7d87470b6b2f2466ef80e1aee86d498724824cccde9172a173ce79e4052a9527",
+  "lib/subsync.js": "4e87ef55d0cb016d75c3cb8a8f31f2842bad7e053b8cb11cf24cc2b52959a120",
   "lib/tmdb.js": "587b3f2617b84263f3f1d7e5f40a0c00b008db72330d84443f00e7f28ca13651",
   "lib/updater.js": "35395b02d2fbc63d37f6e2bb9650f90f70a86740cb43bd1ab301cd838709c77b",
-  "lib/worldtv.js": "f99625f31883498c7fbac397997efc2c6966cb81e642ff4515a1ba0e84969adc",
-  "main.js": "f4fe8cb420b739c977eaa759e97358db1d9e62e2ddae2fe9b8d4df79207b16ec",
-  "package.json": "b0d91185ba39ed6cc449edb58d17d3a825de811f5511ea22938f7e6df0c70736",
-  "preload.js": "9948bc81062517ac9a9dd8caf20b1ff1f2cfd898110e497f391be9b38b541bc3",
-  "renderer/app.js": "8cd8a65c33e14d7b1d9f8789e38e741c630bf7300321a61972fe92c7f622fb7d",
+  "lib/worldtv.js": "87696dc9da684609d14e2858a533c5243a364f2f7db1f9a67c1e98cd27aab906",
+  "main.js": "0a95366966cd504f10dd1e5628d8e1f375422d0293dfa6f1390a4ad1dd1568eb",
+  "package.json": "6dd40122bebc239b4e8a590ec9d23af41cb9470c5c3f0463f0687fa7b3902d64",
+  "preload.js": "cb741f10aa87a0244f5bf44373a6685564acbb33803e15d3ff5a1ad989379d7b",
+  "renderer/app.js": "27f37c9e947433e5132d2efb10f36a58af147fb1b411f5ce675e5e10f48cc2ec",
   "renderer/hls.min.js": "cfc70cc9e9fc63d071919e087670abc760c8fd1bc889b88588026e4d22193bbe",
-  "renderer/index.html": "3b50ad8ba68036aa179cb29921ccbcf7b1f22055ffc8974904a018c25bb05401",
+  "renderer/index.html": "398fd1dc3c6221e765858ec3a28b914f0c36f9a2de45eeeb4789088611d61744",
   "renderer/radio.js": "0e0254b4aad2b20af36256eaefd672298c2b600bd66a06ac7f1de9a24f80a8f2",
-  "renderer/style.css": "dfa764dbaadeb321fcf5c66b2c735cce56b6d92546ea48fb87d9243887357348",
-  "renderer/worldtv.js": "aba4928fb25c106238d17eb371e130e288ec3b8589e4cae2f296fb1a87290c53"
+  "renderer/style.css": "93845229353dc991bdcaf55c7a2870a4539cb7b2e314fdb51192e3c8772fbda9",
+  "renderer/worldtv.js": "b055663b51b02f34a674d78f7ad390f1ac309658ec11b1bd0ea78ff00753d007"
  }
 }

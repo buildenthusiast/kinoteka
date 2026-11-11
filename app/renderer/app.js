@@ -144,7 +144,54 @@ function wideCard(entry) {
 }
 
 // ---------- изгледи -------------------------------------------------------
+// ---------- профили --------------------------------------------------------
+function curProfile() { return (lib.profiles || []).find(p => p.id === lib.curProfile) || { id: 'main', name: 'Аз' }; }
+const avatar = (p) => `<i class="avatar" style="background:${esc(p.color || '#f5b83d')}">${esc((p.name || '?').slice(0, 1).toUpperCase())}</i>`;
+function renderProfileBtn() {
+  const p = curProfile();
+  $('#profile-btn').innerHTML = `${avatar(p)}<span>${esc(p.name)}${p.kids ? ' 🧒' : ''}</span><b>▾</b>`;
+  $('#profile-menu').innerHTML = (lib.profiles || []).map(x => `<div data-profile="${esc(x.id)}" class="${x.id === p.id ? 'sel' : ''}">${avatar(x)} ${esc(x.name)}${x.kids ? ' 🧒' : ''}</div>`).join('') +
+    '<div class="sep"></div><div data-profile="manage">⚙️ Управлявай профилите</div>';
+}
+$('#profile-btn').addEventListener('click', (e) => { e.stopPropagation(); $('#profile-menu').classList.toggle('hidden'); });
+$('#profile-menu').addEventListener('click', async (e) => {
+  const d = e.target.closest('[data-profile]'); if (!d) return;
+  $('#profile-menu').classList.add('hidden');
+  if (d.dataset.profile === 'manage') { view = { name: 'settings' }; return render(); }
+  if (d.dataset.profile === lib.curProfile) return;
+  lib = await window.api.profileSwitch(d.dataset.profile);
+  toast(`Профил: ${curProfile().name}`);
+  render();
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('#profile-wrap')) $('#profile-menu').classList.add('hidden'); });
+function profilesBox() {
+  const ps = lib.profiles || [];
+  return `<div class="box" id="profiles-box"><b>Профили</b>
+    <div class="hint" style="margin:6px 0 10px">Всеки профил има свои любими, „За гледане“, докъде е стигнал, статистика, канали и радиа. Детският профил (🧒) показва в World TV само детски и семейни канали.</div>
+    ${ps.map(p => `<div class="folder"><span style="display:flex;gap:8px;align-items:center;flex:1">${avatar(p)}<input type="text" data-pname="${esc(p.id)}" value="${esc(p.name)}" style="max-width:220px"></span>
+      <label class="chk" style="margin:0"><input type="checkbox" data-pkids="${esc(p.id)}" ${p.kids ? 'checked' : ''}> 🧒 детски</label>
+      ${p.id === lib.curProfile ? '<span class="hint" style="margin:0">текущ</span>' : `<button data-pswitch="${esc(p.id)}">Влез</button>`}
+      ${ps.length > 1 ? `<button data-premove="${esc(p.id)}" title="Изтрий профила и данните му">✕</button>` : ''}</div>`).join('')}
+    <div class="actions"><input type="text" id="new-profile" placeholder="Име на нов профил" style="flex:1"><label class="chk" style="margin:0"><input type="checkbox" id="new-profile-kids"> 🧒 детски</label><button class="primary" data-action="add-profile">＋ Добави</button></div></div>`;
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-pswitch],[data-premove]'); if (!t) return;
+  if (t.dataset.pswitch) { lib = await window.api.profileSwitch(t.dataset.pswitch); toast(`Профил: ${curProfile().name}`); return render(); }
+  const p = (lib.profiles || []).find(x => x.id === t.dataset.premove);
+  if (p && t.dataset.sure) { lib = await window.api.profileRemove(p.id); toast(`Профилът „${p.name}“ е изтрит.`); return render(); }
+  if (p) { t.dataset.sure = '1'; t.textContent = 'Сигурен ли си? Изтрий'; }
+});
+document.addEventListener('change', async (e) => {
+  const n = e.target.dataset.pname, k = e.target.dataset.pkids;
+  if (!n && !k) return;
+  const p = (lib.profiles || []).find(x => x.id === (n || k)); if (!p) return;
+  const r = await window.api.profileSave({ id: p.id, name: n ? e.target.value : p.name, kids: k ? e.target.checked : p.kids });
+  if (r.error) return toast(r.error);
+  lib = r; renderProfileBtn(); if (W.data) wtvUpdateGrid();
+});
+
 function render() {
+  renderProfileBtn();
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view.name || (view.name === 'detail' && b.dataset.view === (view.param.type === 'series' ? 'series' : 'movies'))));
   $('#top').style.display = ['home', 'movies', 'series', 'favs', 'watch'].includes(view.name) ? '' : 'none';
   syncGenreSelect();
@@ -272,6 +319,7 @@ function renderSettings() {
   const s = lib.settings;
   window.api.version().then(v => { const el = $('#app-ver'); if (el) el.textContent = v; });
   return `<div class="settings"><h2>Настройки</h2>
+  ${profilesBox()}
   <div class="box"><b>Папки в библиотеката</b>
     ${lib.folders.map(f => `<div class="folder"><span>${esc(f)}</span><button data-remove-folder="${esc(f)}">Премахни</button></div>`).join('') || '<div class="hint">Няма добавени папки.</div>'}
     <div class="actions"><button class="primary" data-action="add">＋ Добави папка</button><button data-action="rescan">↻ Сканирай отново</button></div>
@@ -292,6 +340,7 @@ function renderSettings() {
     <label class="chk"><input type="checkbox" id="auto-next" ${s.autoNext ? 'checked' : ''}> Пускай следващия епизод автоматично</label>
  <label class="chk"><input type="checkbox" id="auto-skip" ${s.autoSkipIntro ? 'checked' : ''}> Прескачай интрото автоматично (иначе се показва бутон)</label>
     <label class="chk"><input type="checkbox" id="prefer-bg" ${s.preferBg !== false ? 'checked' : ''}> Предпочитай български звук; ако няма — български субтитри</label>
+    <label class="chk"><input type="checkbox" id="auto-bg-subs" ${s.autoBgSubs !== false ? 'checked' : ''}> Ако няма български субтитри — свали автоматично от OpenSubtitles (нужен е ключът по-горе) и ги синхронизирай</label>
     <label class="chk">Размер на субтитрите <input type="range" id="sub-size" min="60" max="180" step="10" value="${s.subSize || 100}"> <span id="sub-size-v">${s.subSize || 100}%</span></label>
     <div class="hint">Клавиши: Space — пауза, ← → — 10 сек, ↑ ↓ — звук, F — цял екран, M — без звук, S — субтитри, A — аудио, N — следващ епизод, R — друг случаен, G / H — субтитрите по-рано / по-късно, Esc — изход.</div></div>
   </div>`;
@@ -319,6 +368,11 @@ document.addEventListener('click', async (ev) => {
   if (d.action === 'add') { if (await window.api.addFolder()) toast('Сканирам папката…'); return; }
   if (d.action === 'rescan') { window.api.rescan(); return toast('Сканирам отново…'); }
   if (d.action === 'back') { view = view.prev || { name: 'home' }; return render(); }
+  if (d.action === 'add-profile') {
+    const r = await window.api.profileSave({ name: $('#new-profile').value, kids: $('#new-profile-kids').checked });
+    if (r.error) return toast(r.error);
+    lib = r; toast('Профилът е добавен.'); return render();
+  }
   if (d.action === 'check-update') { toast('Проверявам…'); return window.api.checkUpdate(); }
   if (d.action === 'save-os') { lib.settings = await window.api.setSettings({ osKey: $('#os-key').value.trim(), osUser: $('#os-user').value.trim(), osPass: $('#os-pass').value }); return toast('Запазено.'); }
   if (d.action === 'save-key') { await window.api.setSettings({ tmdbKey: $('#tmdb-key').value.trim() }); toast('Запазено. Тегля корици…'); return refresh(); }
@@ -327,6 +381,7 @@ document.addEventListener('change', async (ev) => {
   if (ev.target.id === 'auto-next') lib.settings = await window.api.setSettings({ autoNext: ev.target.checked });
   if (ev.target.id === 'auto-skip') lib.settings = await window.api.setSettings({ autoSkipIntro: ev.target.checked });
   if (ev.target.id === 'prefer-bg') lib.settings = await window.api.setSettings({ preferBg: ev.target.checked });
+  if (ev.target.id === 'auto-bg-subs') lib.settings = await window.api.setSettings({ autoBgSubs: ev.target.checked });
   if (ev.target.id === 'sub-size') lib.settings = await window.api.setSettings({ subSize: +ev.target.value });
 });
 document.addEventListener('input', (ev) => { if (ev.target.id === 'sub-size') $('#sub-size-v').textContent = ev.target.value + '%'; });
@@ -428,6 +483,7 @@ async function play(id, opts = {}) {
     if (ext >= 0) selectSubs({ kind: 'ext', index: ext });
     else if (emb >= 0) selectSubs({ kind: 'emb', index: emb });
     else if (media.externalSubs.length === 1) selectSubs({ kind: 'ext', index: 0 });
+    else autoBgSubs(id).catch(() => {});
   }
   const p = prog(id);
   const start = !opts.fromStart && p.pos > 20 && !p.done && p.pos < P.dur - 10 ? p.pos : 0;
@@ -674,6 +730,7 @@ function buildMenus() {
   P.media.info.subs.forEach((s, i) => { if (s.text) subs.push(`<div data-sub="emb:${i}" class="${P.subSel && P.subSel.kind === 'emb' && P.subSel.index === i ? 'sel' : ''}">${esc(trackName(s, i, 'sub'))}</div>`); });
   if (P.media.info.subs.some(s => !s.text)) subs.push(`<div style="color:var(--mute);cursor:default">(има и графични субтитри — не се поддържат)</div>`);
   subs.push('<div class="sep"></div><div data-sub="online">🔍 Търси български субтитри онлайн</div><div data-sub="file">📂 Зареди .srt файл…</div>');
+  if (P.cues.length) subs.push('<div data-sub="autosync">🎯 Синхронизирай автоматично</div>');
   subs.push(`<div class="sep"></div><div class="row2">Закъснение: <button data-shift="-0.5">−0,5</button><b style="min-width:52px;text-align:center">${(P.subDelay || 0).toFixed(1).replace('.', ',')} с</b><button data-shift="0.5">+0,5</button>${P.subDelay ? '<button data-shift="reset">0</button>' : ''}</div>`);
   $('#p-subs').innerHTML = subs.join('');
 }
@@ -701,6 +758,7 @@ $('#p-subs').onclick = async (e) => {
   }
   const d = e.target.closest('[data-sub]'); if (!d) return;
   if (d.dataset.sub === 'online') { e.stopPropagation(); return searchOnline(); }
+  if (d.dataset.sub === 'autosync') { $('#p-subs').classList.add('hidden'); return autoSync(); }
   $('#p-subs').classList.add('hidden');
   const v = d.dataset.sub;
   if (v === 'off') { P.subSel = null; P.cues = []; $('#subtitle').textContent = ''; return buildMenus(); }
@@ -708,6 +766,31 @@ $('#p-subs').onclick = async (e) => {
   const [kind, index] = v.split(':');
   selectSubs({ kind, index: +index });
 };
+// автоматично синхронизиране: сравнява кога се говори с репликите
+async function autoSync(quiet) {
+  const id = P.item && P.item.id, cues = P.cues;
+  if (!id || !cues.length) return;
+  if (!quiet) toast('🎯 Синхронизирам субтитрите (слушам звука)…', 20000);
+  const r = await window.api.autosyncSubs({ id, cues: cues.map(c => ({ start: c.start, end: c.end })), audio: P.audio });
+  if (!P.item || P.item.id !== id || P.cues !== cues) return;
+  if (!r || r.error) return quiet ? null : toast('Не успях да синхронизирам: ' + ((r && r.error) || 'грешка'), 5000);
+  if (r.confidence < 0.25) return quiet ? null : toast('Не съм сигурен за отместването — остават както са. Можеш да ги местиш с G / H.', 5000);
+  shiftSubs(r.offset - (P.subDelay || 0));
+  toast(Math.abs(r.offset) < 0.15 ? '🎯 Субтитрите вече са в синхрон.' : `🎯 Субтитрите са преместени с ${r.offset > 0 ? '+' : ''}${r.offset.toFixed(1).replace('.', ',')} сек.`, 4000);
+}
+// автоматично сваляне на български субтитри, ако филмът няма такива
+async function autoBgSubs(id) {
+  if (!lib.settings.osKey || lib.settings.autoBgSubs === false) return;
+  const r = await window.api.searchSubs(id);
+  if (!P.item || P.item.id !== id || P.cues.length || P.subSel || !r || r.error || !r.results.length) return;
+  const best = r.results[0];
+  toast('Свалям български субтитри…');
+  const d = await window.api.downloadSubs({ id, fileId: best.fileId });
+  if (!P.item || P.item.id !== id || P.subSel || d.error) return d && d.error ? toast('Субтитри: ' + d.error, 5000) : null;
+  P.cues = d.cues || []; P.subSel = { kind: 'file' }; buildMenus();
+  toast(`✓ Български субтитри: ${d.name}`, 4000);
+  if (!best.exact && P.cues.length) autoSync(true);
+}
 async function searchOnline() {
   const m = $('#p-subs');
   m.innerHTML = '<div class="lbl">Търся български субтитри…</div>';

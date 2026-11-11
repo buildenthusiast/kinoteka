@@ -98,4 +98,57 @@ async function load(dataDir, force = false) {
   }
 }
 
-module.exports = { parse, load, countryOf, httpUrl, PLAYLIST_URL };
+// ---- проверка дали каналът отговаря (за скриване на мъртвите) -----------------
+// Резултатите се пазят 24 часа. „Мъртъв“ = грешка/отказ (вкл. 403 — най-често блокиран за държавата).
+const HEALTH_AGE = 24 * 3600 * 1000;
+let health = null, healthFile = null, healthSaveT = null;
+function healthLoad(dataDir) {
+  if (health) return health;
+  healthFile = path.join(dataDir, 'worldtv-health.json');
+  try { health = JSON.parse(fs.readFileSync(healthFile, 'utf8')); } catch { health = {}; }
+  const now = Date.now();
+  for (const k in health) if (now - health[k].t > HEALTH_AGE) delete health[k];
+  return health;
+}
+function healthSave() {
+  clearTimeout(healthSaveT);
+  healthSaveT = setTimeout(() => { try { fs.writeFileSync(healthFile, JSON.stringify(health)); } catch {} }, 2000);
+}
+function probe(ch) {
+  return new Promise((resolve) => {
+    let done = false;
+    const fin = (ok) => { if (!done) { done = true; resolve(ok); } };
+    const go = (url, left) => {
+      let req;
+      try {
+        const headers = { 'User-Agent': ch.ua || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' };
+        if (ch.referrer) headers.Referer = ch.referrer;
+        req = (url.startsWith('https:') ? https : http).get(url, { headers, timeout: 8000 }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && left > 0) { res.resume(); return go(new URL(res.headers.location, url).href, left - 1); }
+          if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); return fin(false); }
+          let got = '';
+          res.on('data', (c) => { got += c.toString('latin1'); if (got.length > 2048) { res.destroy(); fin(!/\.m3u8?(\?|$)/i.test(url) || got.includes('#EXTM3U')); } });
+          res.on('end', () => fin(got.length > 0 && (!/\.m3u8?(\?|$)/i.test(url) || got.includes('#EXTM3U'))));
+          res.on('error', () => fin(got.length > 0));
+        });
+      } catch { return fin(false); }
+      req.on('timeout', () => { req.destroy(); fin(false); });
+      req.on('error', () => fin(false));
+    };
+    go(ch.url, 4);
+  });
+}
+// chans: [{url, ua, referrer}] -> { url: true/false }
+async function check(dataDir, chans) {
+  const h = healthLoad(dataDir), out = {}, todo = [];
+  for (const c of chans) { const u = httpUrl(c.url); if (!u) continue; if (h[u]) out[u] = h[u].ok; else todo.push({ ...c, url: u }); }
+  let i = 0;
+  const worker = async () => { while (i < todo.length) { const c = todo[i++]; const ok = await probe(c); h[c.url] = { ok, t: Date.now() }; out[c.url] = ok; } };
+  await Promise.all(Array.from({ length: 10 }, worker));
+  if (todo.length) healthSave();
+  return out;
+}
+function known(dataDir) { const h = healthLoad(dataDir), out = {}; for (const k in h) out[k] = h[k].ok; return out; }
+function mark(dataDir, url, ok) { const h = healthLoad(dataDir); h[url] = { ok, t: Date.now() }; healthSave(); }
+
+module.exports = { parse, load, countryOf, httpUrl, check, known, mark, PLAYLIST_URL };

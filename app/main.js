@@ -9,6 +9,8 @@ const intro = require('./lib/intro');
 const opensubs = require('./lib/opensubs');
 const updater = require('./lib/updater');
 const worldtv = require('./lib/worldtv');
+const epg = require('./lib/epg');
+const subsync = require('./lib/subsync');
 const radio = require('./lib/radio');
 
 let win, server;
@@ -24,6 +26,9 @@ function load() {
   db.settings = Object.assign({ tmdbKey: '', autoNext: true, subSize: 100, favs: [], watch: [] }, db.settings);
   db.intros = db.intros || {};
   db.stats = Object.assign({ total: 0, byItem: {}, byDay: {} }, db.stats);
+  if (!Array.isArray(db.profiles) || !db.profiles.length) db.profiles = [{ id: 'main', name: 'Аз', color: '#f5b83d' }];
+  if (!db.profiles.some(p => p.id === db.curProfile)) db.curProfile = db.profiles[0].id;
+  db.profileData = db.profileData || {};
   rebuildIndex();
 }
 let saveTimer = null;
@@ -143,6 +148,8 @@ function libraryForRenderer() {
     settings: db.settings,
     stats: db.stats,
     progress: db.progress,
+    profiles: db.profiles,
+    curProfile: db.curProfile,
     movies: db.movies.map(m => ({ ...decorate(m), thumb: img(m.id, 'thumb') })),
     series: db.series.map(s => ({ ...decorate(s), thumb: s.episodes[0] ? img(s.episodes[0].id, 'thumb') : null,
       episodes: s.episodes.map(e => ({ ...e, thumb: img(e.id, 'thumb') })) }))
@@ -150,6 +157,47 @@ function libraryForRenderer() {
 }
 
 ipcMain.handle('library:get', () => libraryForRenderer());
+
+// ---- профили -----------------------------------------------------------
+// Всеки профил има свои любими, „за гледане“, прогрес, статистика, канали и радиа.
+// Данните на текущия профил стоят на обичайните места (db.progress, db.settings.favs …),
+// а тези на останалите — в db.profileData[id].
+const PROFILE_KEYS = ['favs', 'watch', 'contHidden', 'wtvFavs', 'wtvRecent', 'radioFavs'];
+function stashProfile() {
+  const d = { progress: db.progress, stats: db.stats };
+  for (const k of PROFILE_KEYS) d[k] = db.settings[k];
+  db.profileData[db.curProfile] = d;
+}
+function loadProfile(id) {
+  const d = db.profileData[id] || {};
+  db.progress = d.progress || {};
+  db.stats = Object.assign({ total: 0, byItem: {}, byDay: {} }, d.stats);
+  for (const k of PROFILE_KEYS) db.settings[k] = d[k] !== undefined ? d[k] : (k === 'contHidden' ? {} : []);
+  delete db.profileData[id];
+  db.curProfile = id;
+}
+ipcMain.handle('profile:switch', (_e, id) => {
+  if (id === db.curProfile || !db.profiles.some(p => p.id === id)) return libraryForRenderer();
+  stashProfile(); loadProfile(id); save();
+  return libraryForRenderer();
+});
+ipcMain.handle('profile:save', (_e, p) => {
+  const name = String((p && p.name) || '').trim().slice(0, 30);
+  if (!name) return { error: 'Въведи име.' };
+  const ex = db.profiles.find(x => x.id === p.id);
+  if (ex) Object.assign(ex, { name, kids: !!p.kids });
+  else db.profiles.push({ id: 'p' + Date.now().toString(36), name, kids: !!p.kids, color: ['#5aa9e6', '#7fc8a9', '#e86a92', '#b28dff', '#ff9f43'][db.profiles.length % 5] });
+  save();
+  return libraryForRenderer();
+});
+ipcMain.handle('profile:remove', (_e, id) => {
+  if (db.profiles.length < 2 || !db.profiles.some(p => p.id === id)) return libraryForRenderer();
+  if (id === db.curProfile) loadProfile(db.profiles.find(p => p.id !== id).id);
+  db.profiles = db.profiles.filter(p => p.id !== id);
+  delete db.profileData[id];
+  save();
+  return libraryForRenderer();
+});
 ipcMain.handle('library:addFolder', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Избери папка с филми или сериали', properties: ['openDirectory', 'multiSelections'] });
   if (r.canceled) return false;
@@ -268,6 +316,16 @@ ipcMain.handle('subs:download', async (_e, { id, fileId }) => {
   } catch (e) { return { error: e.message }; }
 });
 
+ipcMain.handle('subs:autosync', async (_e, { id, cues, audio }) => {
+  const file = index.files.get(id);
+  if (!file || !Array.isArray(cues)) return { error: 'Файлът не е намерен.' };
+  try {
+    const info = await media.probe(file);
+    const n = info ? info.audio.length : 0;
+    const r = await subsync.sync(media.FFMPEG, file, cues.map(c => ({ start: +c.start, end: +c.end })), audio < n ? audio : 0);
+    return r || { error: 'Няма достатъчно реплики или говор за сравнение.' };
+  } catch (e) { return { error: e.message }; }
+});
 ipcMain.handle('media:stop', () => { server.stopAll(); return true; });
 ipcMain.handle('shell:showFile', (_e, id) => { const f = index.files.get(id); if (f) shell.showItemInFolder(f); });
 ipcMain.handle('shell:openExternal', (_e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
@@ -310,6 +368,10 @@ ipcMain.handle('wtv:play', (_e, ch) => {
   const q = new URLSearchParams({ k: server.token, u, ref: wtvHdr.referrer, ua: wtvHdr.ua });
   return { liveUrl: `${server.base}/live?${q}` };   // резервен път през ffmpeg
 });
+ipcMain.handle('wtv:check', (_e, chans) => worldtv.check(DATA(), Array.isArray(chans) ? chans.slice(0, 200) : []));
+ipcMain.handle('wtv:health', () => worldtv.known(DATA()));
+ipcMain.handle('wtv:mark', (_e, { url, ok }) => worldtv.mark(DATA(), String(url), !!ok));
+ipcMain.handle('wtv:epg', async (_e, ch) => { try { return await epg.forChannel(DATA(), ch || {}); } catch { return null; } });
 function setupWtvRequests() {
   const isLocal = (u) => /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
   const ours = (d) => win && !win.isDestroyed() && d.webContentsId === win.webContents.id && /^https?:/i.test(d.url) && !isLocal(d.url);
