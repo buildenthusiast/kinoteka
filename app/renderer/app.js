@@ -154,7 +154,7 @@ function render() {
   v.innerHTML = ({ home: renderHome, movies: () => renderGrid('movies'), series: () => renderGrid('series'), detail: renderDetail, settings: renderSettings,
     favs: () => renderList('♥ Любими', byIds(lib.settings.favs), 'Натисни „♥ Любим“ в страницата на филм или сериал, за да го добавиш тук.'),
     watch: () => renderList('🕒 За гледане', byIds(lib.settings.watch), 'Натисни „🕒 За гледане“ в страницата на филм или сериал, за да го запазиш за по-късно.'),
-    stats: renderStats, tv: renderTv, wtv: () => renderWtv(), radio: () => renderRadio() })[view.name]();
+    stats: renderStats, wtv: () => renderWtv(), radio: () => renderRadio() })[view.name]();
   v.dataset.view = view.name + JSON.stringify(view.param || '');
   if (keepScroll) v.scrollTop = st;
 }
@@ -297,34 +297,11 @@ function renderSettings() {
   </div>`;
 }
 
-// ---------- телевизия на живо --------------------------------------------
-let tvChannels = null;
-function renderTv() {
-  if (!tvChannels) { window.api.tvList().then(c => { tvChannels = c; if (view.name === 'tv') render(); }); return '<h2>📡 Телевизия на живо</h2><div class="hint">Зареждам…</div>'; }
-  const card = (c) => `<div class="tv-card" data-tv="${esc(c.id)}" title="Гледай ${esc(c.name)} на живо">
-      <div class="tv-logo" style="background:linear-gradient(135deg, ${esc(c.color)}, #10131b)"><span>${esc(c.name)}</span><i class="live">● НА ЖИВО</i></div>
-      <div class="tv-meta"><div class="t">${esc(c.name)}</div><div class="s">${esc(c.desc || '')}</div></div>
-      <div class="tv-actions"><button class="primary" data-tv="${esc(c.id)}">▶ Гледай</button>${c.embed ? `<button data-tv-page="${esc(c.id)}" title="Отвори пълната страница на телевизията (с програмата)">🌐 Сайт</button>` : ''}${c.builtin ? '' : `<button data-tv-remove="${esc(c.id)}" title="Премахни">✕</button>`}</div>
-    </div>`;
-  const groups = [...new Set(tvChannels.map(c => c.group))];
-  return `<div class="tv"><h2>📡 Телевизия на живо</h2>
-    <div class="hint">Само официални безплатни излъчвания — каналите се пускат от сайта и плейъра на самата телевизия, в отделен прозорец.
-      В прозореца: <b>F11</b> — цял екран, <b>Page Up / Page Down</b> — друг канал, <b>F5</b> — презареди. Някои предавания (напр. спорт и чужди филми) може да са спрени извън България заради авторски права.</div>
-    ${groups.map(g => `<h2>${esc(g)}</h2><div class="tv-grid">${tvChannels.filter(c => c.group === g).map(card).join('')}</div>`).join('')}
-    <div class="settings"><div class="box"><b>Добави канал</b>
-      <div class="hint" style="margin:6px 0 10px">Постави връзката към официалната страница „На живо“ на телевизия, която излъчва безплатно (напр. от сайта на самата телевизия).</div>
-      <div class="actions"><input type="text" id="tv-name" placeholder="Име (напр. Канал 3)" style="flex:1"><input type="text" id="tv-url" placeholder="https://…" style="flex:2"><button class="primary" data-action="tv-add">＋ Добави</button></div>
-    </div></div></div>`;
-}
-
 // ---------- събития ------------------------------------------------------
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-view],[data-open],[data-play],[data-play-start],[data-action],[data-season],[data-season-done],[data-toggle-done],[data-show],[data-remove-folder],[data-ext],[data-random-series],[data-list],[data-dismiss],[data-goto],[data-tv],[data-tv-page],[data-tv-remove]');
+  const t = ev.target.closest('[data-view],[data-open],[data-play],[data-play-start],[data-action],[data-season],[data-season-done],[data-toggle-done],[data-show],[data-remove-folder],[data-ext],[data-random-series],[data-list],[data-dismiss],[data-goto]');
   if (!t || t.id === 'view' || t.closest('#player')) return;   // #view носи data-view само за запомняне на изгледа
   const d = t.dataset;
-  if (d.tvRemove) { ev.stopPropagation(); tvChannels = await window.api.tvRemove(d.tvRemove); return render(); }
-  if (d.tvPage) { ev.stopPropagation(); return window.api.tvOpen({ id: d.tvPage, mode: 'page' }); }
-  if (d.tv) { ev.stopPropagation(); return window.api.tvOpen({ id: d.tv, mode: 'embed' }); }
   if (d.toggleDone) { ev.stopPropagation(); const p = prog(d.toggleDone); await window.api.setProgress({ id: d.toggleDone, done: !p.done, pos: 0 }); return refresh(); }
   if (d.view) { view = { name: d.view }; $('#view').scrollTop = 0; return d.view === 'stats' ? refresh() : render(); }
   if (d.open) { const [type, id] = d.open.split(':'); view = { name: 'detail', param: { type, id }, prev: view }; $('#view').scrollTop = 0; return render(); }
@@ -342,11 +319,6 @@ document.addEventListener('click', async (ev) => {
   if (d.action === 'add') { if (await window.api.addFolder()) toast('Сканирам папката…'); return; }
   if (d.action === 'rescan') { window.api.rescan(); return toast('Сканирам отново…'); }
   if (d.action === 'back') { view = view.prev || { name: 'home' }; return render(); }
-  if (d.action === 'tv-add') {
-    const r = await window.api.tvAdd({ name: $('#tv-name').value, url: $('#tv-url').value });
-    if (r.error) return toast(r.error);
-    tvChannels = r.channels; toast('Каналът е добавен.'); return render();
-  }
   if (d.action === 'check-update') { toast('Проверявам…'); return window.api.checkUpdate(); }
   if (d.action === 'save-os') { lib.settings = await window.api.setSettings({ osKey: $('#os-key').value.trim(), osUser: $('#os-user').value.trim(), osPass: $('#os-pass').value }); return toast('Запазено.'); }
   if (d.action === 'save-key') { await window.api.setSettings({ tmdbKey: $('#tmdb-key').value.trim() }); toast('Запазено. Тегля корици…'); return refresh(); }

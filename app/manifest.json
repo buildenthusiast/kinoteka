@@ -1,6 +1,6 @@
 {
- "version": "0.5.0",
- "notes": "Нов раздел Радио — 194 български радиа с търсачка",
+ "version": "0.5.1",
+ "notes": "World TV: мини-плейър в ъгъла и блокиране на реклами; махнат е старият раздел Телевизия",
  "files": {
   "lib/intro.js": "c6c927630f7bb612032fc290c26e240f05d57c93d1f40cf4117056f7ccd09cb6",
   "lib/media.js": "8ceed2ff737c4e06e5bc5e011fe32c38183f87aac354927c88ce84ae48a9294c",
@@ -9,17 +9,16 @@
   "lib/radio.js": "ae098aba540b0f971ccb88f5698b53fe61cc488e063b800a4e31c7f2d9c79c17",
   "lib/scanner.js": "7d87470b6b2f2466ef80e1aee86d498724824cccde9172a173ce79e4052a9527",
   "lib/tmdb.js": "587b3f2617b84263f3f1d7e5f40a0c00b008db72330d84443f00e7f28ca13651",
-  "lib/tv.js": "b2fd0165181a5e95c4156a5f13d643953327afc54ebd603e3883444714faaf95",
   "lib/updater.js": "35395b02d2fbc63d37f6e2bb9650f90f70a86740cb43bd1ab301cd838709c77b",
   "lib/worldtv.js": "f99625f31883498c7fbac397997efc2c6966cb81e642ff4515a1ba0e84969adc",
-  "main.js": "ec9f2089b130ed003319a5b961c6c4a5c1cecf7ec8374953829d3307e1c257c3",
-  "package.json": "cda27354cd15dead12ab2276b69c7eddc2378a9ea65816a65b425122d24bae4b",
-  "preload.js": "22a3673c4c6bd05065553ab0013c021a4bc48a96643e9ddc46644aff9f48c22a",
-  "renderer/app.js": "fb488fa9da3f47f98f5cbc2b051747112990845e817324e24d6ad65680144eea",
+  "main.js": "f4fe8cb420b739c977eaa759e97358db1d9e62e2ddae2fe9b8d4df79207b16ec",
+  "package.json": "b0d91185ba39ed6cc449edb58d17d3a825de811f5511ea22938f7e6df0c70736",
+  "preload.js": "9948bc81062517ac9a9dd8caf20b1ff1f2cfd898110e497f391be9b38b541bc3",
+  "renderer/app.js": "8cd8a65c33e14d7b1d9f8789e38e741c630bf7300321a61972fe92c7f622fb7d",
   "renderer/hls.min.js": "cfc70cc9e9fc63d071919e087670abc760c8fd1bc889b88588026e4d22193bbe",
-  "renderer/index.html": "90d46f09b371665babba2a2845d772f73b05e8f3820fcab67ffef119b7674ae7",
+  "renderer/index.html": "3b50ad8ba68036aa179cb29921ccbcf7b1f22055ffc8974904a018c25bb05401",
   "renderer/radio.js": "0e0254b4aad2b20af36256eaefd672298c2b600bd66a06ac7f1de9a24f80a8f2",
-  "renderer/style.css": "a7f210d06556bf510cd516ec6dac3c00e2c1e33bb6257bc55dd3f78710d80cad",
-  "renderer/worldtv.js": "607ff6bac843b57661a8bd7983c580886726c11fd7858fbe4be16814ff80d254"
+  "renderer/style.css": "dfa764dbaadeb321fcf5c66b2c735cce56b6d92546ea48fb87d9243887357348",
+  "renderer/worldtv.js": "aba4928fb25c106238d17eb371e130e288ec3b8589e4cae2f296fb1a87290c53"
  }
 }

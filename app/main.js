@@ -8,7 +8,6 @@ const tmdb = require('./lib/tmdb');
 const intro = require('./lib/intro');
 const opensubs = require('./lib/opensubs');
 const updater = require('./lib/updater');
-const tv = require('./lib/tv');
 const worldtv = require('./lib/worldtv');
 const radio = require('./lib/radio');
 
@@ -291,76 +290,6 @@ async function checkUpdate(manual) {
   }
 }
 
-// ---- телевизия на живо ---------------------------------------------------
-// Каналите се гледат в официалния плейър/сайт на телевизията, в отделен прозорец.
-let tvWin = null, tvCur = null;
-const tvChannels = () => tv.list(db.settings.tvCustom || []);
-function tvLoad(ch, mode) {
-  tvCur = { id: ch.id, mode: mode === 'page' || !ch.embed ? 'page' : 'embed' };
-  const url = tvCur.mode === 'embed' ? ch.embed : ch.page;
-  tvWin.setTitle(ch.name + ' — на живо');
-  tvWin.loadURL(url, { httpReferrer: ch.page }).catch(() => {});
-}
-function openTv(id, mode) {
-  const ch = tvChannels().find(c => c.id === id);
-  if (!ch) return false;
-  if (!tvWin || tvWin.isDestroyed()) {
-    tvWin = new BrowserWindow({
-      width: 1280, height: 760, minWidth: 480, minHeight: 300, backgroundColor: '#000000', title: ch.name, autoHideMenuBar: true,
-      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:tv' }
-    });
-    tvWin.setMenu(null);
-    const wc = tvWin.webContents;
-    wc.setWindowOpenHandler(() => ({ action: 'deny' }));   // без изскачащи прозорци/реклами
-    wc.on('page-title-updated', (e) => e.preventDefault());
-    const css = () => {
-      wc.insertCSS(tv.NO_SCROLLBAR_CSS).catch(() => {});
-      if (tvCur && tvCur.mode === 'embed') wc.insertCSS(tv.EMBED_CSS).catch(() => {});
-    };
-    wc.on('dom-ready', css);
-    // CSS и във вградените рамки (плейърът често е в iframe)
-    wc.on('did-frame-finish-load', (_e, isMain) => {
-      if (isMain) return;
-      for (const f of wc.mainFrame.framesInSubtree) if (f !== wc.mainFrame) f.executeJavaScript(`(()=>{const s=document.createElement('style');s.textContent=${JSON.stringify(tv.NO_SCROLLBAR_CSS)};(document.head||document.documentElement).appendChild(s)})()`).catch(() => {});
-    });
-    wc.on('did-fail-load', (_e, code, _d, _u, isMain) => {
-      // вграденият плейър не тръгна — отваряме официалната страница
-      if (isMain && code !== -3 && tvCur && tvCur.mode === 'embed') { const c = tvChannels().find(x => x.id === tvCur.id); if (c) tvLoad(c, 'page'); }
-    });
-    wc.on('before-input-event', (e, input) => {
-      if (input.type !== 'keyDown') return;
-      const all = tvChannels(), i = all.findIndex(c => tvCur && c.id === tvCur.id);
-      if (input.key === 'F11') { tvWin.setFullScreen(!tvWin.isFullScreen()); e.preventDefault(); }
-      else if (input.key === 'Escape' && tvWin.isFullScreen()) { tvWin.setFullScreen(false); e.preventDefault(); }
-      else if (input.key === 'F5') { wc.reload(); e.preventDefault(); }
-      else if (input.key === 'PageDown' || input.key === 'PageUp') {
-        const n = all[(i + (input.key === 'PageDown' ? 1 : -1) + all.length) % all.length];
-        if (n) tvLoad(n, 'embed'); e.preventDefault();
-      }
-    });
-    tvWin.on('closed', () => { tvWin = null; tvCur = null; });
-  }
-  tvLoad(ch, mode);
-  tvWin.show(); tvWin.focus();
-  return true;
-}
-ipcMain.handle('tv:list', () => tvChannels());
-ipcMain.handle('tv:open', (_e, { id, mode }) => openTv(id, mode));
-ipcMain.handle('tv:add', (_e, { name, url }) => {
-  const page = tv.httpsOnly(url);
-  name = String(name || '').trim().slice(0, 60);
-  if (!page) return { error: 'Връзката трябва да започва с https://' };
-  if (!name) name = new URL(page).hostname;
-  db.settings.tvCustom = [...(db.settings.tvCustom || []), { id: 'c' + Date.now().toString(36), name, page }];
-  save();
-  return { channels: tvChannels() };
-});
-ipcMain.handle('tv:remove', (_e, id) => {
-  db.settings.tvCustom = (db.settings.tvCustom || []).filter(c => c.id !== id);
-  save();
-  return tvChannels();
-});
-
 // ---- World TV (iptv-org) -------------------------------------------------
 // Каналите се пускат в самата програма (hls.js). Много сървъри не пращат CORS заглавки
 // и искат определен Referer/User-Agent — затова ги добавяме за заявките на главния прозорец.
@@ -426,7 +355,6 @@ app.whenReady().then(async () => {
     width: 1400, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0d0f14', title: 'Кинотека',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true }
   });
-  win.on('closed', () => { if (tvWin && !tvWin.isDestroyed()) tvWin.close(); });
   win.on('enter-full-screen', () => notify('fullscreen', true));
   win.on('leave-full-screen', () => notify('fullscreen', false));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
