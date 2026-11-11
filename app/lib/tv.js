@@ -29,4 +29,7 @@ function list(custom = []) {
 const EMBED_CSS = 'html,body{margin:0!important;padding:0!important;background:#000!important;width:100%!important;height:100%!important;overflow:hidden!important}' +
   'video{width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important}';
 
-module.exports = { BUILTIN, list, httpsOnly, EMBED_CSS };
+// Скрива лентите за превъртане във всички режими (превъртането с колелцето остава)
+const NO_SCROLLBAR_CSS = '::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}html,body{scrollbar-width:none!important}';
+
+module.exports = { BUILTIN, list, httpsOnly, EMBED_CSS, NO_SCROLLBAR_CSS };

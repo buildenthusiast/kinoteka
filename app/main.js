@@ -311,7 +311,16 @@ function openTv(id, mode) {
     const wc = tvWin.webContents;
     wc.setWindowOpenHandler(() => ({ action: 'deny' }));   // без изскачащи прозорци/реклами
     wc.on('page-title-updated', (e) => e.preventDefault());
-    wc.on('did-finish-load', () => { if (tvCur && tvCur.mode === 'embed') wc.insertCSS(tv.EMBED_CSS).catch(() => {}); });
+    const css = () => {
+      wc.insertCSS(tv.NO_SCROLLBAR_CSS).catch(() => {});
+      if (tvCur && tvCur.mode === 'embed') wc.insertCSS(tv.EMBED_CSS).catch(() => {});
+    };
+    wc.on('dom-ready', css);
+    // CSS и във вградените рамки (плейърът често е в iframe)
+    wc.on('did-frame-finish-load', (_e, isMain) => {
+      if (isMain) return;
+      for (const f of wc.mainFrame.framesInSubtree) if (f !== wc.mainFrame) f.executeJavaScript(`(()=>{const s=document.createElement('style');s.textContent=${JSON.stringify(tv.NO_SCROLLBAR_CSS)};(document.head||document.documentElement).appendChild(s)})()`).catch(() => {});
+    });
     wc.on('did-fail-load', (_e, code, _d, _u, isMain) => {
       // вграденият плейър не тръгна — отваряме официалната страница
       if (isMain && code !== -3 && tvCur && tvCur.mode === 'embed') { const c = tvChannels().find(x => x.id === tvCur.id); if (c) tvLoad(c, 'page'); }
