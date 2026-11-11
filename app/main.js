@@ -316,7 +316,6 @@ function openTv(id, mode) {
       if (tvCur && tvCur.mode === 'embed') wc.insertCSS(tv.EMBED_CSS).catch(() => {});
     };
     wc.on('dom-ready', css);
-    wc.on('did-navigate-in-page', css);
     // CSS и във вградените рамки (плейърът често е в iframe)
     wc.on('did-frame-finish-load', (_e, isMain) => {
       if (isMain) return;
