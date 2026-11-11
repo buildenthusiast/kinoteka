@@ -10,6 +10,7 @@ const opensubs = require('./lib/opensubs');
 const updater = require('./lib/updater');
 const tv = require('./lib/tv');
 const worldtv = require('./lib/worldtv');
+const radio = require('./lib/radio');
 
 let win, server;
 const DATA = () => app.getPath('userData');
@@ -401,6 +402,15 @@ function setupWtvRequests() {
     cb({ responseHeaders: h });
   });
 }
+
+// ---- Радио (radiosbg.com) -------------------------------------------------
+ipcMain.handle('radio:list', () => ({ stations: radio.list() }));
+ipcMain.handle('radio:resolve', async (_e, slug, force) => {
+  const r = await radio.resolve(DATA(), String(slug || ''), !!force);
+  // резервен път през ffmpeg за потоци, които Chromium не пуска сам
+  r.live = r.streams.map(u => `${server.base}/live?${new URLSearchParams({ k: server.token, u, ref: '', ua: '' })}`);
+  return r;
+});
 
 ipcMain.handle('win:fullscreen', (_e, v) => { win.setFullScreen(v === undefined ? !win.isFullScreen() : !!v); return win.isFullScreen(); });
 

@@ -28,6 +28,7 @@ async function refresh() {
   lib = await window.api.getLibrary();
   if (!$('#player').classList.contains('hidden')) return; // не пречим на плейъра
   if (view.name === 'wtv' && $('#wtv-grid')) return;      // World TV не зависи от библиотеката — пазим търсачката
+  if (view.name === 'radio' && $('#radio-grid')) return;
   render();
 }
 
@@ -153,7 +154,7 @@ function render() {
   v.innerHTML = ({ home: renderHome, movies: () => renderGrid('movies'), series: () => renderGrid('series'), detail: renderDetail, settings: renderSettings,
     favs: () => renderList('♥ Любими', byIds(lib.settings.favs), 'Натисни „♥ Любим“ в страницата на филм или сериал, за да го добавиш тук.'),
     watch: () => renderList('🕒 За гледане', byIds(lib.settings.watch), 'Натисни „🕒 За гледане“ в страницата на филм или сериал, за да го запазиш за по-късно.'),
-    stats: renderStats, tv: renderTv, wtv: () => renderWtv() })[view.name]();
+    stats: renderStats, tv: renderTv, wtv: () => renderWtv(), radio: () => renderRadio() })[view.name]();
   v.dataset.view = view.name + JSON.stringify(view.param || '');
   if (keepScroll) v.scrollTop = st;
 }

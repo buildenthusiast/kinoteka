@@ -17,6 +17,7 @@
     <button data-view="watch" class="nav-btn">🕒 За гледане</button>
     <button data-view="tv" class="nav-btn">📡 Телевизия</button>
     <button data-view="wtv" class="nav-btn">🌍 World TV</button>
+    <button data-view="radio" class="nav-btn">📻 Радио</button>
     <div class="nav-sep"></div>
     <button id="rand-ep" class="nav-btn rand" title="Пуска случаен епизод от всички сериали и продължава със случайни">🎲 Случаен епизод</button>
     <button id="rand-movie" class="nav-btn rand" title="Пуска случаен филм (първо негледаните)">🎲 Случаен филм</button>
@@ -106,10 +107,23 @@
     <button id="wtv-fs" title="Цял екран (F)">⛶</button>
   </div>
 </div>
+<div id="radio-bar" class="hidden">
+  <audio id="radio-audio"></audio>
+  <div id="radio-logo">📻</div>
+  <div class="radio-info"><div id="radio-title" title="Към раздел Радио"></div><div id="radio-status"></div></div>
+  <button id="radio-prev" title="Предишно радио">⏮</button>
+  <button id="radio-play" class="primary" title="Пусни/Пауза">▶</button>
+  <button id="radio-next" title="Следващо радио">⏭</button>
+  <button id="radio-mute" title="Звук">🔊</button>
+  <input id="radio-vol" type="range" min="0" max="1" step="0.02" value="1">
+  <button id="radio-fav" title="Любимо">☆</button>
+  <button id="radio-close" title="Спри радиото">✕</button>
+</div>
 <div id="toast" class="hidden"></div>
 <div id="update-bar" class="hidden"><span id="update-text"></span><button id="update-restart" class="primary">Рестартирай сега</button><button id="update-later">По-късно</button></div>
 <script src="app.js"></script>
 <script src="hls.min.js"></script>
 <script src="worldtv.js"></script>
+<script src="radio.js"></script>
 </body>
 </html>
