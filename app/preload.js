@@ -27,5 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   tvRemove: inv('tv:remove'),
   wtvList: inv('wtv:list'),
   wtvPlay: inv('wtv:play'),
+  radioList: inv('radio:list'),
+  radioResolve: inv('radio:resolve'),
   on: (ch, fn) => { const h = (_e, p) => fn(p); ipcRenderer.on(ch, h); return () => ipcRenderer.off(ch, h); }
 });
