@@ -150,6 +150,23 @@ function startServer({ resolveFile, resolveImage }) {
         res.writeHead(200, { 'Content-Type': ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg', 'Cache-Control': 'max-age=3600' });
         return fs.createReadStream(p).pipe(res);
       }
+      if (url.pathname === '/live') {
+        // World TV: поток, който браузърът не може да пусне сам (напр. MPEG-TS, HEVC) — ffmpeg го преобразува като VLC
+        const src = url.searchParams.get('u') || '';
+        if (!/^https?:\/\//i.test(src)) { res.writeHead(400); return res.end(); }
+        if (active) { try { active.kill('SIGKILL'); } catch {} }
+        const ff = spawn(FFMPEG, buildLiveArgs(src, url.searchParams.get('ref') || '', url.searchParams.get('ua') || ''), { windowsHide: true });
+        active = ff;
+        res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
+        ff.stdout.pipe(res);
+        ff.stderr.on('data', () => {});
+        ff.on('error', () => res.end());
+        const kill = () => { try { ff.kill('SIGKILL'); } catch {} };
+        req.on('close', kill);
+        res.on('close', kill);
+        ff.on('close', () => { if (active === ff) active = null; res.end(); });
+        return;
+      }
       const file = resolveFile(url.searchParams.get('id'));
       if (!file || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }
 
@@ -215,6 +232,17 @@ function buildStreamArgs(file, info, t, audioIdx, forceTranscode, extAudio = [])
   return args;
 }
 
+function buildLiveArgs(src, referrer, ua) {
+  const args = ['-v', 'error', '-nostdin', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-rw_timeout', '15000000'];
+  if (ua) args.push('-user_agent', ua);
+  if (referrer) args.push('-headers', 'Referer: ' + referrer + '\r\n');
+  args.push('-i', src, '-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '23', '-vf', 'scale=w=min(1920\\,iw):h=-2,format=yuv420p', '-g', '50',
+    '-c:a', 'aac', '-b:a', '160k', '-ac', '2',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1');
+  return args;
+}
+
 function serveRange(file, req, res) {
   const size = fs.statSync(file).size;
   const ext = path.extname(file).toLowerCase();
@@ -234,4 +262,4 @@ function serveRange(file, req, res) {
   }
 }
 
-module.exports = { probe, canPlayDirect, thumbnail, readExternalSubs, extractEmbeddedSubs, startServer, buildStreamArgs, parseSrtVtt, decodeText, FFMPEG, FFPROBE };
+module.exports = { probe, canPlayDirect, thumbnail, readExternalSubs, extractEmbeddedSubs, startServer, buildStreamArgs, buildLiveArgs, parseSrtVtt, decodeText, FFMPEG, FFPROBE };
