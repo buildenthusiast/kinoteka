@@ -149,3 +149,17 @@ button.on { border-color:var(--accent); color:var(--accent); }
 .menu .row2 { display:flex; gap:6px; align-items:center; cursor:default; }
 .menu .row2 button { padding:4px 10px !important; }
 #update-bar { position:fixed; right:20px; bottom:20px; z-index:90; background:#1c2030; border:1px solid var(--accent); border-radius:12px; padding:12px 14px; display:flex; gap:10px; align-items:center; box-shadow:0 8px 24px #0009; }
+/* телевизия */
+.tv > .hint { color:var(--mute); font-size:12px; line-height:1.6; max-width:900px; }
+.tv .settings { margin-top:26px; }
+.tv-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:18px; }
+.tv-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; cursor:pointer; transition:transform .15s, border-color .15s; }
+.tv-card:hover { transform:translateY(-3px); border-color:#3a4157; }
+.tv-logo { aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; position:relative; }
+.tv-logo span { font-size:34px; font-weight:800; letter-spacing:1px; text-shadow:0 3px 10px rgba(0,0,0,.5); }
+.tv-logo .live { position:absolute; top:10px; left:10px; font-style:normal; font-size:11px; font-weight:700; background:rgba(0,0,0,.55); color:#ff5a5a; padding:2px 8px; border-radius:6px; }
+.tv-meta { padding:10px 12px 0; }
+.tv-meta .t { font-weight:600; }
+.tv-meta .s { color:var(--mute); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tv-actions { display:flex; gap:8px; padding:10px 12px 12px; }
+.tv-actions .primary { flex:1; }
