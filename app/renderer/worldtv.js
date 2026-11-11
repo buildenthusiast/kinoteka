@@ -3,7 +3,7 @@
 // WORLD TV — каналите от iptv-org, пускани в програмата (hls.js, а при нужда през ffmpeg)
 // Използва $, esc, toast, view, render, lib и isFs от app.js.
 // =========================================================================
-const W = { data: null, loading: false, q: '', country: '', cat: '', favOnly: false, limit: 240, list: [], cur: -1, hls: null, stage: 0, timer: null, token: 0 };
+const W = { data: null, loading: false, q: '', country: '', cat: '', favOnly: false, limit: 240, list: [], shown: [], health: {}, byUrl: new Map(), deadHidden: 0, cur: -1, hls: null, stage: 0, timer: null, token: 0 };
 
 const WTV_CAT = { Animation: 'Анимация', Auto: 'Авто', Business: 'Бизнес', Classic: 'Класика', Comedy: 'Комедия', Cooking: 'Кулинария', Culture: 'Култура',
   Documentary: 'Документални', Education: 'Образование', Entertainment: 'Развлекателни', Family: 'Семейни', General: 'Общи', Kids: 'Детски', Legislative: 'Парламент',
@@ -20,6 +20,10 @@ const norm = (s) => String(s || '').toLowerCase().replace(/[\s\-_.:'’!]+/g, ''
 const latin = (s) => s.replace(/[а-я]/g, c => CYR[c] ?? c);
 
 const favs = () => new Set(lib.settings.wtvFavs || []);
+const hideDead = () => lib.settings.wtvHideDead !== false;
+// детски профил: само детски и семейни канали
+const KIDS_CATS = ['Kids', 'Animation', 'Family', 'Education'];
+const kidsOnly = () => !!(typeof curProfile === 'function' && curProfile().kids);
 
 function wtvLoad(force) {
   if (W.loading) return;
@@ -29,6 +33,8 @@ function wtvLoad(force) {
     W.loading = false;
     for (const c of d.channels) c._n = norm(c.name + ' ' + (c.tvgId || '').split('.')[0]);
     W.data = d;
+    W.byUrl = new Map(d.channels.map(c => [c.url, c]));
+    window.api.wtvHealth().then(h => { W.health = h || {}; if (view.name === 'wtv') wtvUpdateGrid(); });
     if (d.error && !d.channels.length) toast('Не мога да изтегля списъка с канали: ' + d.error, 6000);
     else if (d.error && force) toast('Не мога да обновя списъка — показвам запазения.', 5000);
     else if (force) toast(`Списъкът е обновен: ${d.channels.length} канала.`);
@@ -38,31 +44,63 @@ function wtvLoad(force) {
 
 function wtvFilter() {
   const all = W.data ? W.data.channels : [];
-  const q = norm(W.q), ql = latin(q), f = favs();
-  W.list = all.filter(c => (!W.country || c.country === W.country) && (!W.cat || c.groups.includes(W.cat)) && (!W.favOnly || f.has(c.url)) &&
-    (!q || c._n.includes(q) || c._n.includes(ql)));
+  const q = norm(W.q), ql = latin(q), f = favs(), hd = hideDead(), kids = kidsOnly();
+  W.deadHidden = 0;
+  W.shown = all.filter(c => {
+    if (W.country && c.country !== W.country) return false;
+    if (W.cat && !c.groups.includes(W.cat)) return false;
+    if (kids && !c.groups.some(g => KIDS_CATS.includes(g))) return false;
+    if (W.favOnly && !f.has(c.url)) return false;
+    if (q && !c._n.includes(q) && !c._n.includes(ql)) return false;
+    if (hd && W.health[c.url] === false) { W.deadHidden++; return false; }
+    return true;
+  });
   if (q) {   // първо тези, които започват с търсеното
     const starts = (c) => c._n.startsWith(q) || c._n.startsWith(ql) ? 0 : 1;
-    W.list.sort((a, b) => starts(a) - starts(b));
+    W.shown.sort((a, b) => starts(a) - starts(b));
   }
-  return W.list;
+  return W.shown;
 }
 
-function wtvCard(c, i, f) {
+function wtvCard(c, i, f, attr = 'data-wtv-i') {
   const sub = [wtvCountry(c.country), c.groups.map(wtvCat).join(', ')].filter(Boolean).join(' · ');
   const badges = [c.quality, ...c.tags.map(t => /geo/i.test(t) ? '🌍 само в някои държави' : /24\/7/i.test(t) ? 'не денонощно' : t)].filter(Boolean);
-  return `<div class="wtv-card" data-wtv-i="${i}" title="${esc(c.name)}">
+  return `<div class="wtv-card${W.health[c.url] === false ? ' dead' : ''}" ${attr}="${i}" data-url="${esc(c.url)}" title="${esc(c.name)}">
     <div class="wtv-logo">${c.logo ? `<img src="${esc(c.logo)}" loading="lazy" referrerpolicy="no-referrer" data-fallback="hide">` : ''}<span>${esc(c.name.slice(0, 2).toUpperCase())}</span></div>
     <div class="wtv-meta"><div class="t">${esc(c.name)}</div><div class="s">${esc(sub)}</div>${badges.length ? `<div class="b">${badges.map(b => `<i>${esc(b)}</i>`).join('')}</div>` : ''}</div>
-    <button class="wtv-star${f.has(c.url) ? ' on' : ''}" data-wtv-fav="${i}" title="Любим">${f.has(c.url) ? '★' : '☆'}</button>
+    ${attr === 'data-wtv-i' ? `<button class="wtv-star${f.has(c.url) ? ' on' : ''}" data-wtv-fav="${i}" title="Любим">${f.has(c.url) ? '★' : '☆'}</button>` : ''}
+    <i class="wtv-dead">не работи</i>
   </div>`;
+}
+function wtvRecent() { return (lib.settings.wtvRecent || []).map(u => W.byUrl.get(u)).filter(c => c && (!kidsOnly() || c.groups.some(g => KIDS_CATS.includes(g)))); }
+function wtvRecentHtml() {
+  if (W.q || W.country || W.cat || W.favOnly) return '';
+  const r = wtvRecent(); if (!r.length) return '';
+  return `<h3 class="wtv-h">🕒 Наскоро гледани</h3><div class="wtv-row-recent">${r.map((c, i) => wtvCard(c, i, null, 'data-wtv-r')).join('')}</div>`;
+}
+// проверява на заден план показаните канали, които още не са проверени
+async function wtvCheckVisible() {
+  if (W.checking || view.name !== 'wtv' || !$('#wtv-grid')) return;
+  W.checking = true;
+  try {
+    while (view.name === 'wtv') {
+      const cards = [...document.querySelectorAll('#wtv-grid .wtv-card[data-url]')].map(el => el.dataset.url).filter(u => !(u in W.health));
+      const batch = [...new Set(cards)].slice(0, 40).map(u => W.byUrl.get(u)).filter(Boolean);
+      if (!batch.length) break;
+      const r = await window.api.wtvCheck(batch.map(c => ({ url: c.url, ua: c.ua, referrer: c.referrer })));
+      for (const c of batch) W.health[c.url] = r && c.url in r ? r[c.url] : true;
+      for (const el of document.querySelectorAll('#wtv-grid .wtv-card[data-url]')) if (W.health[el.dataset.url] === false) el.classList.add('dead');
+    }
+  } catch {} finally { W.checking = false; }
 }
 
 function wtvGridHtml() {
   const list = wtvFilter(), f = favs();
-  if (!list.length) return `<div class="empty">${W.favOnly && !favs().size ? 'Нямаш любими канали още — натисни ☆ на някой канал.' : 'Няма канали с тези филтри.'}</div>`;
+  const dead = W.deadHidden ? ` · ${W.deadHidden} неработещи са скрити` : '';
+  if (!list.length) return wtvRecentHtml() + `<div class="empty">${W.favOnly && !favs().size ? 'Нямаш любими канали още — натисни ☆ на някой канал.' : 'Няма канали с тези филтри.'}${dead}</div>`;
   const shown = list.slice(0, W.limit);
-  return `<div class="wtv-count">${list.length} канала${list.length > shown.length ? ` · показани ${shown.length}` : ''}</div>
+  setTimeout(wtvCheckVisible, 50);
+  return wtvRecentHtml() + `<div class="wtv-count">${list.length} канала${list.length > shown.length ? ` · показани ${shown.length}` : ''}${dead}</div>
     <div class="wtv-grid">${shown.map((c, i) => wtvCard(c, i, f)).join('')}</div>
     ${list.length > shown.length ? '<div class="wtv-more"><button data-wtv-act="more">Покажи още</button></div>' : ''}`;
 }
@@ -82,6 +120,7 @@ function renderWtv() {
       <select id="wtv-country"><option value="">Всички държави</option>${countries.map(c => `<option value="${esc(c.k)}"${c.k === W.country ? ' selected' : ''}>${esc(c.name)} (${c.n})</option>`).join('')}</select>
       <select id="wtv-cat"><option value="">Всички категории</option>${cats.map(c => `<option value="${esc(c.k)}"${c.k === W.cat ? ' selected' : ''}>${esc(c.name)} (${c.n})</option>`).join('')}</select>
       <button id="wtv-favs" class="${W.favOnly ? 'on' : ''}" data-wtv-act="favs">★ Любими</button>
+      <button class="${hideDead() ? 'on' : ''}" data-wtv-act="dead" title="Каналите се проверяват на заден план; неработещите (или спрени за България) се скриват за 24 часа">🚫 Скрий неработещите</button>
       <button data-wtv-act="reload" title="Изтегли списъка наново">⟳ Обнови</button>
     </div>
     <div class="hint">Публичен списък с безплатни канали (iptv-org), обновен ${esc(when)}. Каналите са от външни сървъри — някои може да не работят, да са спрени в България или да вървят само в определени часове.
@@ -108,11 +147,13 @@ document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('[data-wtv-i],[data-wtv-fav],[data-wtv-act]');
   if (!t || !t.closest('#view')) return;
   const d = t.dataset;
-  if (d.wtvFav !== undefined) { ev.stopPropagation(); await wtvToggleFav(W.list[+d.wtvFav]); if (W.favOnly) return wtvUpdateGrid(); const on = favs().has(W.list[+d.wtvFav].url); t.classList.toggle('on', on); t.textContent = on ? '★' : '☆'; return; }
+  if (d.wtvFav !== undefined) { ev.stopPropagation(); await wtvToggleFav(W.shown[+d.wtvFav]); if (W.favOnly) return wtvUpdateGrid(); const on = favs().has(W.shown[+d.wtvFav].url); t.classList.toggle('on', on); t.textContent = on ? '★' : '☆'; return; }
   if (d.wtvAct === 'more') { W.limit += 480; return wtvUpdateGrid(); }
   if (d.wtvAct === 'favs') { W.favOnly = !W.favOnly; t.classList.toggle('on', W.favOnly); W.limit = 240; return wtvUpdateGrid(); }
   if (d.wtvAct === 'reload') return wtvLoad(true);
-  if (d.wtvI !== undefined) return wtvOpen(+d.wtvI);
+  if (d.wtvAct === 'dead') { lib.settings = await window.api.setSettings({ wtvHideDead: !hideDead() }); t.classList.toggle('on', hideDead()); return wtvUpdateGrid(); }
+  if (d.wtvR !== undefined) { W.list = wtvRecent(); return wtvOpen(+d.wtvR); }
+  if (d.wtvI !== undefined) { W.list = W.shown.slice(); return wtvOpen(+d.wtvI); }
 });
 
 // ---- плейър --------------------------------------------------------------
@@ -150,6 +191,34 @@ async function wtvOpen(i) {
   wtvAdUI();
   wtvNextStage(tok);
   if (!$('#wtv-side').classList.contains('hidden')) wtvSideList();
+  wtvEpgLoad(ch, tok);
+}
+
+// ---- програма (какво върви сега и после) ------------------------------------
+const hm = (t) => new Date(t).toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
+async function wtvEpgLoad(ch, tok) {
+  clearInterval(W.epgT);
+  W.epg = null; wtvEpgUI();
+  try { W.epg = await window.api.wtvEpg({ tvgId: ch.tvgId, name: ch.name, country: ch.country }); } catch {}
+  if (tok !== W.token) return;
+  wtvEpgUI();
+  W.epgT = setInterval(wtvEpgUI, 30000);
+}
+function wtvEpgUI() {
+  const el = $('#wtv-epg');
+  const e = W.epg, now = Date.now();
+  if (e) {   // минава на следващото предаване, когато текущото свърши
+    const all = [e.now, ...(e.next || [])].filter(Boolean);
+    const i = all.findIndex(p => p.stop > now);
+    if (i > 0) { const rest = all.slice(i); e.now = rest[0].start <= now ? rest[0] : null; e.next = e.now ? rest.slice(1) : rest; }
+  }
+  if (!e || (!e.now && !(e.next || []).length)) { el.innerHTML = ''; el.classList.add('hidden'); $('#wtv-mini-title').title = ''; return; }
+  const p = e.now, nx = (e.next || []).slice(0, 3);
+  const pct = p ? Math.min(100, Math.max(0, (now - p.start) / (p.stop - p.start) * 100)) : 0;
+  el.innerHTML = (p ? `<div class="now" title="${esc(p.desc || '')}"><b>Сега:</b> ${esc(p.title)} <span>${hm(p.start)}–${hm(p.stop)}</span><div class="epg-bar"><div style="width:${pct}%"></div></div></div>` : '') +
+    (nx.length ? `<div class="next">${nx.map(x => `<span>${hm(x.start)} ${esc(x.title)}</span>`).join('')}</div>` : '');
+  el.classList.remove('hidden');
+  $('#wtv-mini-title').title = p ? 'Сега: ' + p.title : '';
 }
 
 function wtvNextStage(tok, why) {
@@ -160,6 +229,7 @@ function wtvNextStage(tok, why) {
   const ch = W.list[W.cur];
   if (!how) {
     wtvSpin(false);
+    if (ch) { W.health[ch.url] = false; window.api.wtvMark({ url: ch.url, ok: false }); }
     return wtvMsg(`<b>Каналът не работи в момента.</b><div>${esc(why || 'Сървърът не отговаря или не позволява гледане оттук.')}</div>
       <div class="actions"><button class="primary" data-wtv-p="next">Следващ канал ⏭</button><button data-wtv-p="retry">Опитай пак</button></div>`);
   }
@@ -235,7 +305,16 @@ function wtvAdsSeen() {
 }
 function wtvAdUI() { const b = $('#wtv-ad'); b.textContent = wtvAdOn() ? '🛡 Без реклами' : '🛡 Реклами: да'; b.classList.toggle('off', !wtvAdOn()); b.classList.remove('hit'); }
 
-wv.addEventListener('playing', () => { clearTimeout(W.timer); wtvSpin(false); wtvMsg(''); wtvUpdateUI(); });
+wv.addEventListener('playing', () => {
+  clearTimeout(W.timer); wtvSpin(false); wtvMsg(''); wtvUpdateUI();
+  const ch = W.list[W.cur];
+  if (ch && W.recentFor !== W.token) {
+    W.recentFor = W.token;
+    if (W.health[ch.url] !== true) { W.health[ch.url] = true; window.api.wtvMark({ url: ch.url, ok: true }); }
+    const rec = [ch.url, ...(lib.settings.wtvRecent || []).filter(u => u !== ch.url)].slice(0, 20);
+    window.api.setSettings({ wtvRecent: rec }).then(st => { lib.settings = st; });
+  }
+});
 wv.addEventListener('waiting', () => wtvSpin(true));
 wv.addEventListener('pause', wtvUpdateUI);
 wv.addEventListener('volumechange', wtvUpdateUI);
@@ -256,6 +335,7 @@ function wtvExpand() { $('#wtv-player').classList.remove('mini'); wtvShowControl
 const wtvActive = () => !$('#wtv-player').classList.contains('hidden');
 
 function wtvClose() {
+  clearInterval(W.epgT);
   $('#wtv-player').classList.remove('mini');
   W.token++;
   wtvStopMedia();
