@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, session, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const scanner = require('./lib/scanner');
@@ -12,6 +12,7 @@ const worldtv = require('./lib/worldtv');
 const epg = require('./lib/epg');
 const subsync = require('./lib/subsync');
 const radio = require('./lib/radio');
+const recorder = require('./lib/recorder');
 
 let win, server;
 const DATA = () => app.getPath('userData');
@@ -29,6 +30,7 @@ function load() {
   if (!Array.isArray(db.profiles) || !db.profiles.length) db.profiles = [{ id: 'main', name: 'Аз', color: '#f5b83d' }];
   if (!db.profiles.some(p => p.id === db.curProfile)) db.curProfile = db.profiles[0].id;
   db.profileData = db.profileData || {};
+  db.recRules = db.recRules || []; db.recs = db.recs || []; db.recOnce = db.recOnce || []; db.recSkip = db.recSkip || {};
   rebuildIndex();
 }
 let saveTimer = null;
@@ -403,6 +405,233 @@ ipcMain.handle('radio:resolve', async (_e, slug, force) => {
   return r;
 });
 
+// ---- Запис на телевизия ----------------------------------------------------
+// Ръчен запис (⏺ в плейъра) и автоматичен: правила „записвай този сериал по този канал“,
+// по които програмата (EPG) се гледа на всеки 15 минути. Записът почва 2 мин по-рано
+// и свършва 5 мин по-късно, защото каналите рядко спазват програмата точно.
+const REC_PRE = 2 * 60e3, REC_POST = 5 * 60e3, REC_MAX = 4 * 3600e3;
+const recDir = () => db.settings.recDir || path.join(app.getPath('videos'), 'Kinoteka записи');
+const recWork = (id) => path.join(DATA(), 'rec-tmp', id);
+const recActive = new Map();   // id -> { r, rec }
+let recUpcoming = [], recBlocker = null, recNotifyT = null, recEpgAt = 0;
+const MONTHS = ['яну', 'фев', 'мар', 'апр', 'май', 'юни', 'юли', 'авг', 'сеп', 'окт', 'ное', 'дек'];
+const normTitle = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const safeName = (s) => String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '').slice(0, 80);
+function recCh(ch) {
+  const url = worldtv.httpUrl(ch && ch.url);
+  if (!url) return null;
+  return { url, name: String(ch.name || '').slice(0, 120), tvgId: String(ch.tvgId || '').slice(0, 120), country: String(ch.country || '').slice(0, 4),
+    ua: String(ch.ua || '').slice(0, 300), referrer: worldtv.httpUrl(ch.referrer) || '', logo: worldtv.httpUrl(ch.logo) || '' };
+}
+function recDedupe(p) {
+  const t = normTitle(p.title);
+  if (p.ep) return t + '|' + p.ep.s + 'x' + p.ep.e;
+  if (p.sub) return t + '|sub:' + normTitle(p.sub);
+  if (p.desc && p.desc.length > 40) return t + '|desc:' + normTitle(p.desc).slice(0, 120);
+  return null;
+}
+function recMatches(rule, p) { const r = normTitle(rule.title); return !!r && (' ' + normTitle(p.title) + ' ').includes(' ' + r + ' '); }
+const recBusy = (key) => key && (db.recs.some(r => r.key === key && ['recording', 'saving', 'done'].includes(r.status)));
+const recRepeat = (dd) => dd && db.recs.some(r => r.dedupe === dd && r.status === 'done' && r.file && fs.existsSync(r.file));
+
+function recState() {
+  const live = (r) => { const a = recActive.get(r.id); return a ? { ...r, ...a.r.info() } : r; };
+  return {
+    dir: recDir(), rules: db.recRules, recs: db.recs.slice(0, 150).map(live),
+    upcoming: recUpcoming.map(u => ({ ...u, ch: { name: u.ch.name, url: u.ch.url }, skip: !!db.recSkip[u.key], busy: !!recBusy(u.key) }))
+  };
+}
+function recNotify() { clearTimeout(recNotifyT); recNotifyT = setTimeout(() => notify('rec-changed', recState()), 400); }
+
+async function recRefresh() {
+  recEpgAt = Date.now();
+  const now = Date.now(), out = [];
+  const byCh = new Map();
+  for (const rule of db.recRules) { const k = rule.ch.url; if (!byCh.has(k)) byCh.set(k, { ch: rule.ch, rules: [] }); byCh.get(k).rules.push(rule); }
+  for (const { ch, rules } of byCh.values()) {
+    let progs = null;
+    try { progs = await epg.programmes(DATA(), ch); } catch {}
+    for (const rule of rules) rule.epg = !!(progs && progs.length);
+    for (const p of progs || []) {
+      if (p.stop + REC_POST <= now) continue;
+      const rule = rules.find(r => recMatches(r, p));
+      if (!rule) continue;
+      const dedupe = recDedupe(p);
+      out.push({ key: ch.url + '|' + p.start, title: p.title, sub: p.sub || '', ep: p.ep || null, start: p.start, stop: p.stop, ch, ruleId: rule.id, dedupe,
+        repeat: rule.skipRepeats !== false && !!recRepeat(dedupe) });
+    }
+  }
+  db.recOnce = db.recOnce.filter(o => o.stop + REC_POST > now);
+  for (const o of db.recOnce) if (!out.some(u => u.key === o.key)) out.push({ ...o, once: true });
+  for (const k of Object.keys(db.recSkip)) if (db.recSkip[k] < now - 86400e3) delete db.recSkip[k];
+  recUpcoming = out.sort((a, b) => a.start - b.start).slice(0, 80);
+  save(); recNotify();
+  recTick();
+}
+function recTick() {
+  const now = Date.now();
+  for (const u of recUpcoming) {
+    if (db.recSkip[u.key] || u.repeat || recBusy(u.key)) continue;
+    if (now >= u.start - REC_PRE && now < u.stop + REC_POST) recStart({ ch: u.ch, title: u.title, sub: u.sub, ep: u.ep, key: u.key, dedupe: u.dedupe, ruleId: u.ruleId, stopAt: u.stop + REC_POST });
+  }
+  if (Date.now() - recEpgAt > 15 * 60e3) recRefresh();
+}
+function recPower() {
+  if (recActive.size && recBlocker === null) recBlocker = powerSaveBlocker.start('prevent-app-suspension');
+  else if (!recActive.size && recBlocker !== null) { powerSaveBlocker.stop(recBlocker); recBlocker = null; }
+}
+function recStart(o) {
+  const ch = recCh(o.ch);
+  if (!ch) return null;
+  const id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const rec = { id, key: o.key || null, title: String(o.title || ch.name).slice(0, 200), sub: o.sub || '', ep: o.ep || null, dedupe: o.dedupe || null,
+    chName: ch.name, chUrl: ch.url, start: Date.now(), planStop: o.stopAt, status: 'recording', ruleId: o.ruleId || null, manual: !o.ruleId };
+  db.recs.unshift(rec);
+  db.recs = db.recs.slice(0, 300);
+  save();
+  const r = new recorder.Recording({ ch, workDir: recWork(id), stopAt: o.stopAt, ffmpeg: media.FFMPEG });
+  recActive.set(id, { r, rec });
+  r.on('progress', recNotify);
+  recPower(); recNotify();
+  notify('toast', '⏺ Записвам „' + rec.title + '“ (' + ch.name + ')');
+  r.run().then(parts => recFinish(rec, parts));
+  return rec;
+}
+function recOutBase(rec) {
+  const show = safeName(rec.title) || 'Запис';
+  const dir = path.join(recDir(), show);
+  let s = 1, e = 1;
+  if (rec.ep && rec.ep.s < 100 && rec.ep.e < 1000) { s = rec.ep.s; e = rec.ep.e; }
+  else {
+    try { for (const f of fs.readdirSync(dir)) { const m = f.match(/ - S01E(\d+) - /); if (m) e = Math.max(e, +m[1] + 1); } } catch {}
+  }
+  const d = new Date(rec.start), p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} ${p2(d.getHours())}ч${p2(d.getMinutes())}`;
+  let base = path.join(dir, `${show} - S${p2(s)}E${p2(e)} - ${rec.sub ? safeName(rec.sub).slice(0, 60) + ' - ' : ''}${stamp}`);
+  const taken = (b) => ['.mp4', '.mkv', '.ts'].some(x => fs.existsSync(b + x));
+  for (let i = 2; taken(base); i++) base = base.replace(/ \(\d+\)$/, '') + ` (${i})`;
+  return base;
+}
+async function recFinish(rec, parts) {
+  const a = recActive.get(rec.id);
+  if (a) Object.assign(rec, a.r.info());
+  rec.status = 'saving'; rec.end = Date.now(); recNotify();
+  try {
+    rec.file = await recorder.finalize(media.FFMPEG, parts, recWork(rec.id), recOutBase(rec));
+    rec.status = 'done'; rec.err = '';
+    rec.libId = scanner.idFor(rec.file);
+    try { rec.bytes = fs.statSync(rec.file).size; } catch {}
+    notify('toast', '✅ Записът „' + rec.title + '“ е готов' + (rec.cuts ? ` — изрязани реклами: ${rec.cuts}` : '') + '.');
+  } catch (e) {
+    rec.status = 'failed'; rec.err = rec.error || e.message;
+    notify('toast', '⚠ Записът „' + rec.title + '“ не стана: ' + rec.err);
+  }
+  recActive.delete(rec.id); recPower();
+  try { fs.rmSync(recWork(rec.id), { recursive: true, force: true }); } catch {}
+  save(); recNotify();
+  if (rec.status !== 'done') return;
+  // в библиотеката (раздел Сериали)
+  const dir = recDir();
+  if (!db.folders.some(f => path.resolve(f).toLowerCase() === path.resolve(dir).toLowerCase() || path.resolve(dir).toLowerCase().startsWith(path.resolve(f).toLowerCase() + path.sep))) db.folders.push(dir);
+  save(); rescan();
+  // без маркери в потока — търсим вероятните реклами по черни кадри и тишина
+  if (!rec.markers || !rec.cuts) {
+    rec.marking = true; recNotify();
+    try { rec.marks = await recorder.findBreaks(media.FFMPEG, rec.file); } catch { rec.marks = []; }
+    rec.marking = false; save(); recNotify();
+  }
+}
+// записи, прекъснати от спиране на програмата — слепваме каквото е записано
+function recRecover() {
+  for (const rec of db.recs) {
+    if (!['recording', 'saving'].includes(rec.status)) continue;
+    let parts = [];
+    try { parts = fs.readdirSync(recWork(rec.id)).filter(f => /^part\d+.*\.(ts|mp4)$/.test(f)).sort().map(f => ({ file: path.join(recWork(rec.id), f), secs: 0 })); } catch {}
+    rec.err = 'Програмата беше затворена по време на записа.';
+    recFinish(rec, parts);
+  }
+}
+
+ipcMain.handle('rec:state', () => recState());
+ipcMain.handle('rec:now', (_e, o) => {
+  const ch = recCh(o && o.ch);
+  if (!ch) return { error: 'Няма канал.' };
+  const now = Date.now();
+  const prog = o.prog && o.prog.stop > now ? o.prog : null;
+  const key = prog ? ch.url + '|' + prog.start : null;
+  if (key && recBusy(key)) return { error: 'Това предаване вече се записва.' };
+  const rec = recStart({ ch, title: prog ? prog.title : ch.name, sub: prog && prog.sub, ep: prog && prog.ep, key, dedupe: prog && recDedupe(prog),
+    stopAt: prog ? Math.min(prog.stop + REC_POST, now + REC_MAX) : now + REC_MAX });
+  return rec ? { ok: true, id: rec.id } : { error: 'Не мога да запиша този канал.' };
+});
+ipcMain.handle('rec:stop', (_e, id) => { const a = recActive.get(id); if (a) a.r.stop(); return true; });
+ipcMain.handle('rec:addRule', (_e, o) => {
+  const ch = recCh(o && o.ch), title = String((o && o.title) || '').trim().slice(0, 120);
+  if (!ch || !title) return { error: 'Напиши името на сериала и избери канал.' };
+  if (!db.recRules.some(r => r.ch.url === ch.url && normTitle(r.title) === normTitle(title)))
+    db.recRules.push({ id: 'q' + Date.now().toString(36), title, ch, skipRepeats: o.skipRepeats !== false });
+  save(); recRefresh();
+  return recState();
+});
+ipcMain.handle('rec:removeRule', (_e, id) => { db.recRules = db.recRules.filter(r => r.id !== id); save(); recRefresh(); return recState(); });
+ipcMain.handle('rec:ruleRepeats', (_e, id) => { const r = db.recRules.find(x => x.id === id); if (r) r.skipRepeats = r.skipRepeats === false; save(); recRefresh(); return recState(); });
+ipcMain.handle('rec:once', (_e, o) => {
+  const ch = recCh(o && o.ch), p = o && o.prog;
+  if (!ch || !p || !(p.stop > Date.now())) return { error: 'Предаването вече е минало.' };
+  const key = ch.url + '|' + p.start;
+  if (!db.recOnce.some(x => x.key === key)) db.recOnce.push({ key, ch, title: String(p.title || ch.name).slice(0, 200), sub: p.sub || '', ep: p.ep || null, start: +p.start, stop: +p.stop, dedupe: recDedupe(p) });
+  delete db.recSkip[key];
+  save(); recRefresh();
+  return { ok: true };
+});
+ipcMain.handle('rec:skip', (_e, key) => {
+  if (db.recSkip[key]) delete db.recSkip[key];
+  else { db.recSkip[key] = Date.now(); db.recOnce = db.recOnce.filter(o => o.key !== key); }
+  save(); recRefresh();
+  return recState();
+});
+ipcMain.handle('rec:refresh', () => recRefresh().then(recState));
+ipcMain.handle('rec:remove', async (_e, id) => {
+  const rec = db.recs.find(r => r.id === id);
+  if (!rec || recActive.has(id)) return recState();
+  if (rec.file && fs.existsSync(rec.file)) { try { await shell.trashItem(rec.file); } catch { try { fs.unlinkSync(rec.file); } catch {} } }
+  db.recs = db.recs.filter(r => r.id !== id);
+  save(); if (rec.file) rescan(); recNotify();
+  return recState();
+});
+ipcMain.handle('rec:cut', async (_e, { id, from, to }) => {
+  const rec = db.recs.find(r => r.id === id);
+  if (!rec || !rec.file || !fs.existsSync(rec.file) || !(to > from)) return { error: 'Файлът не е намерен.' };
+  try {
+    await recorder.cut(media.FFMPEG, rec.file, +from, +to, path.join(DATA(), 'rec-tmp', 'cut-' + id));
+    const d = to - from;
+    rec.marks = (rec.marks || []).filter(m => !(m.from === from && m.to === to)).map(m => m.from >= to ? { from: m.from - d, to: m.to - d } : m);
+    rec.cuts = (rec.cuts || 0) + 1; rec.cutSecs = (rec.cutSecs || 0) + d;
+    try { rec.bytes = fs.statSync(rec.file).size; } catch {}
+    for (const s of db.series) for (const e of s.episodes) if (e.id === rec.libId) e.duration = 0;
+    try { fs.unlinkSync(path.join(THUMBS(), rec.libId + '.jpg')); } catch {}
+    save(); recNotify(); backgroundWork();
+    return { ok: true };
+  } catch (e) { return { error: e.message }; }
+});
+ipcMain.handle('rec:titles', async (_e, c) => {
+  const ch = recCh(c); if (!ch) return [];
+  try { const l = await epg.programmes(DATA(), ch); return [...new Set((l || []).filter(p => p.stop > Date.now()).map(p => p.title))].slice(0, 200); } catch { return []; }
+});
+ipcMain.handle('rec:show', (_e, id) => { const rec = db.recs.find(r => r.id === id); if (rec && rec.file) shell.showItemInFolder(rec.file); });
+ipcMain.handle('rec:play', (_e, id) => {
+  const rec = db.recs.find(r => r.id === id);
+  if (!rec || !rec.file || !fs.existsSync(rec.file)) return { error: 'Файлът не е намерен.' };
+  if (rec.libId && index.files.has(rec.libId)) return { libId: rec.libId };
+  shell.openPath(rec.file);
+  return { external: true };
+});
+ipcMain.handle('rec:dir', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Папка за записите', properties: ['openDirectory', 'createDirectory'] });
+  if (!r.canceled && r.filePaths[0]) { db.settings.recDir = r.filePaths[0]; save(); }
+  return recState();
+});
+
 ipcMain.handle('win:fullscreen', (_e, v) => { win.setFullScreen(v === undefined ? !win.isFullScreen() : !!v); return win.isFullScreen(); });
 
 // ---- прозорец ----------------------------------------------------------
@@ -420,8 +649,24 @@ app.whenReady().then(async () => {
   win.on('enter-full-screen', () => notify('fullscreen', true));
   win.on('leave-full-screen', () => notify('fullscreen', false));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // затваряне по време на запис: питаме и слепваме записаното преди изход
+  let closing = false;
+  win.on('close', (e) => {
+    if (closing || !recActive.size) return;
+    e.preventDefault();
+    const n = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Спри записа и затвори', 'Не затваряй'], defaultId: 1, cancelId: 1, title: 'Кинотека',
+      message: 'В момента се записва телевизия.', detail: 'Ако затвориш програмата, записът спира. Записаното досега ще се запази.' });
+    if (n !== 0) return;
+    closing = true;
+    const waits = [...recActive.values()].map(a => new Promise(res => { const t = setInterval(() => { if (!recActive.has(a.rec.id)) { clearInterval(t); res(); } }, 300); }));
+    for (const a of recActive.values()) a.r.stop();
+    Promise.race([Promise.all(waits), new Promise(r => setTimeout(r, 60000))]).then(() => { if (!win.isDestroyed()) win.destroy(); });
+  });
   if (process.env.KINOTEKA_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
   if (db.folders.length) rescan();
+  recRecover();
+  setTimeout(recRefresh, 5000);
+  setInterval(recTick, 30000);
   if (!process.env.KINOTEKA_NO_UPDATE) {
     setTimeout(() => checkUpdate(false), 8000);
     setInterval(() => checkUpdate(false), 3 * 3600 * 1000);

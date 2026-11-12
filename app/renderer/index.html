@@ -18,6 +18,7 @@
     <button data-view="watch" class="nav-btn">🕒 За гледане</button>
     <button data-view="wtv" class="nav-btn">🌍 World TV</button>
     <button data-view="radio" class="nav-btn">📻 Радио</button>
+    <button data-view="rec" class="nav-btn">📼 Записи</button>
     <div class="nav-sep"></div>
     <button id="rand-ep" class="nav-btn rand" title="Пуска случаен епизод от всички сериали и продължава със случайни">🎲 Случаен епизод</button>
     <button id="rand-movie" class="nav-btn rand" title="Пуска случаен филм (първо негледаните)">🎲 Случаен филм</button>
@@ -109,6 +110,7 @@
     <input id="wtv-vol" type="range" min="0" max="1" step="0.02" value="1">
     <span class="wtv-live">● НА ЖИВО</span>
     <div class="grow"></div>
+    <div class="menu-wrap"><button id="wtv-rec" title="Запиши канала или сериала">⏺ Запис</button><div id="wtv-rec-menu" class="menu hidden"></div></div>
     <button id="wtv-ad" title="Блокиране на рекламите в потока">🛡 Без реклами</button>
     <button id="wtv-fav" title="Любим">☆</button>
     <button id="wtv-list" title="Списък с канали (L)">☰ Канали</button>
@@ -132,6 +134,7 @@
 <script src="app.js"></script>
 <script src="hls.min.js"></script>
 <script src="worldtv.js"></script>
+<script src="rec.js"></script>
 <script src="radio.js"></script>
 </body>
 </html>

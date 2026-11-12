@@ -39,6 +39,7 @@ function wtvLoad(force) {
     else if (d.error && force) toast('Не мога да обновя списъка — показвам запазения.', 5000);
     else if (force) toast(`Списъкът е обновен: ${d.channels.length} канала.`);
     if (view.name === 'wtv') render();
+    if (view.name === 'rec') recFormChannels();
   }).catch(e => { W.loading = false; toast('Грешка: ' + e.message); });
 }
 
@@ -144,7 +145,7 @@ async function wtvToggleFav(ch) {
   return f.has(ch.url);
 }
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-wtv-i],[data-wtv-fav],[data-wtv-act]');
+  const t = ev.target.closest('[data-wtv-i],[data-wtv-r],[data-wtv-fav],[data-wtv-act]');
   if (!t || !t.closest('#view')) return;
   const d = t.dataset;
   if (d.wtvFav !== undefined) { ev.stopPropagation(); await wtvToggleFav(W.shown[+d.wtvFav]); if (W.favOnly) return wtvUpdateGrid(); const on = favs().has(W.shown[+d.wtvFav].url); t.classList.toggle('on', on); t.textContent = on ? '★' : '☆'; return; }
@@ -178,6 +179,7 @@ async function wtvOpen(i) {
   $('#wtv-mini-title').textContent = ch.name;
   $('#wtv-sub').textContent = [wtvCountry(ch.country), ch.groups.map(wtvCat).join(', '), ch.quality].filter(Boolean).join(' · ');
   $('#wtv-fav').textContent = favs().has(ch.url) ? '★' : '☆';
+  $('#wtv-rec-menu').classList.add('hidden'); recBtn();
   $('#wtv-logo').innerHTML = ch.logo ? `<img src="${esc(ch.logo)}" referrerpolicy="no-referrer" data-fallback="remove">` : '';
   wtvMsg(''); wtvSpin(true); wtvShowControls();
   wtvStopMedia();
@@ -376,6 +378,7 @@ $('#wtv-player').addEventListener('click', async (ev) => {
   if (a === 'wtv-back') wtvMinimize();
   else if (a === 'wtv-close' || a === 'wtv-close2') wtvClose();
   else if (a === 'wtv-expand') wtvExpand();
+  else if (a === 'wtv-rec') recMenuToggle();
   else if (a === 'wtv-ad') { lib.settings = await window.api.setSettings({ wtvAdblock: !wtvAdOn() }); toast(wtvAdOn() ? 'Блокирането на реклами е включено.' : 'Блокирането на реклами е изключено.'); wtvOpen(W.cur); }
   else if (a === 'wtv-mute2') { wv.muted = !wv.muted; if (!wv.muted && wv.volume === 0) wv.volume = 0.5; }
   else if (a === 'wtv-play') wv.paused ? wv.play().catch(() => {}) : wv.pause();
@@ -402,7 +405,7 @@ function wtvShowControls() {
   const p = $('#wtv-player');
   p.classList.remove('idle');
   clearTimeout(wtvIdleT);
-  wtvIdleT = setTimeout(() => { if (!p.classList.contains('mini') && !wv.paused && $('#wtv-side').classList.contains('hidden')) p.classList.add('idle'); }, 2800);
+  wtvIdleT = setTimeout(() => { if (!p.classList.contains('mini') && !wv.paused && $('#wtv-side').classList.contains('hidden') && $('#wtv-rec-menu').classList.contains('hidden')) p.classList.add('idle'); }, 2800);
 }
 $('#wtv-player').addEventListener('mousemove', wtvShowControls);
 
