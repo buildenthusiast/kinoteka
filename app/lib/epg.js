@@ -79,6 +79,21 @@ function xmltvTime(s) {
   return t;
 }
 
+// <episode-num system="xmltv_ns">0.4.</episode-num> (от нула) или onscreen „S1 E5“ -> { s: 1, e: 5 }
+function episodeNum(body) {
+  for (const m of body.matchAll(/<episode-num[^>]*system="([^"]*)"[^>]*>([\s\S]*?)<\/episode-num>/g)) {
+    const v = unxml(m[2]);
+    if (m[1] === 'xmltv_ns') {
+      const x = v.match(/^\s*(\d+)?\s*(?:\/\s*\d+)?\s*\.\s*(\d+)/);
+      if (x) return { s: x[1] ? +x[1] + 1 : 1, e: +x[2] + 1 };
+    } else {
+      const x = v.match(/s\s*(\d{1,2})\s*[.\s-]*e\s*(\d{1,4})/i);
+      if (x) return { s: +x[1], e: +x[2] };
+    }
+  }
+  return null;
+}
+
 // парсира XMLTV; пази само предавания от последните 3 часа до следващите 36
 function parseXmltv(xml, now = Date.now()) {
   const channels = {}, progs = {};
@@ -98,7 +113,12 @@ function parseXmltv(xml, now = Date.now()) {
     const ch = unxml((a.match(/channel="([^"]*)"/) || [])[1]);
     const title = unxml((m[2].match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1]);
     const desc = unxml((m[2].match(/<desc[^>]*>([\s\S]*?)<\/desc>/) || [])[1]).slice(0, 400);
-    (progs[ch] = progs[ch] || []).push({ start, stop, title, desc });
+    const p = { start, stop, title, desc };
+    const sub = unxml((m[2].match(/<sub-title[^>]*>([\s\S]*?)<\/sub-title>/) || [])[1]);
+    if (sub) p.sub = sub.slice(0, 200);
+    const ep = episodeNum(m[2]);
+    if (ep) p.ep = ep;
+    (progs[ch] = progs[ch] || []).push(p);
   }
   for (const k in progs) progs[k].sort((x, y) => x.start - y.start);
   return { channels, progs };
@@ -137,14 +157,15 @@ function pick(progs, now) {
   return { now: list[0].start <= now ? list[0] : null, next: list[0].start <= now ? list.slice(1) : list };
 }
 
-// ch: { tvgId, name, country }
-async function forChannel(dataDir, ch) {
+// всички предавания на канала (от 3 часа назад до 36 напред); ch: { tvgId, name, country }
+async function programmes(dataDir, ch) {
   const idx = await getIndex(dataDir);
   const now = Date.now();
+  const ok = (l) => l && l.length && l.some(p => p.stop > now);
   const [id, feed] = String(ch.tvgId || '').split('@');
   const exact = (idx.exact[id] || []).slice().sort((a, b) => (b.feed === feed) - (a.feed === feed));
   for (const s of exact.slice(0, 3)) {
-    try { const r = pick((await loadFile(dataDir, s.url)).progs[s.id], now); if (r) return r; } catch {}
+    try { const l = (await loadFile(dataDir, s.url)).progs[s.id]; if (ok(l)) return l; } catch {}
   }
   // по име във файла на държавата
   const want = [norm(ch.name), norm(id)].filter(Boolean);
@@ -152,11 +173,12 @@ async function forChannel(dataDir, ch) {
     try {
       const d = await loadFile(dataDir, url);
       for (const [cid, names] of Object.entries(d.channels)) {
-        if ([cid, ...names].some(n => want.includes(norm(n)))) { const r = pick(d.progs[cid], now); if (r) return r; }
+        if ([cid, ...names].some(n => want.includes(norm(n))) && ok(d.progs[cid])) return d.progs[cid];
       }
     } catch {}
   }
   return null;
 }
+async function forChannel(dataDir, ch) { return pick(await programmes(dataDir, ch), Date.now()); }
 
-module.exports = { forChannel, parseXmltv, xmltvTime, buildIndex, sourceUrl, norm };
+module.exports = { forChannel, programmes, episodeNum, parseXmltv, xmltvTime, buildIndex, sourceUrl, norm };

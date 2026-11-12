@@ -270,3 +270,29 @@ body.radio-on #wtv-player.mini { bottom:84px; }
 #profile-menu > div.sel { color:var(--accent); }
 #profile-menu .sep { height:1px; background:var(--line); margin:4px 2px; }
 #profiles-box .folder input[type=text] { padding:6px 10px; }
+
+/* ---- Записи ---- */
+#wtv-rec.on { background:#b3261e; border-color:#e0453a; color:#fff; font-variant-numeric:tabular-nums; }
+#wtv-rec-menu { min-width:320px; max-height:60vh; }
+#wtv-rec-menu small { color:var(--mute); margin-left:6px; }
+#wtv-rec-menu h5 { margin:8px 10px 2px; font-size:11px; font-weight:500; color:var(--mute); text-transform:uppercase; letter-spacing:.04em; }
+.rec { max-width:1000px; }
+.rec > .hint, .rec .hint { color:var(--mute); font-size:12px; line-height:1.6; margin-bottom:12px; }
+.rec h3 { font-size:15px; font-weight:600; margin:22px 0 8px; display:flex; align-items:center; gap:8px; }
+.rec-add { display:flex; gap:8px; margin:6px 0 4px; }
+.rec-add input { flex:1; min-width:200px; }
+.rec-add input, .rec-add select { font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+.rec-add select { max-width:260px; }
+.rec-row { display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--panel); border:1px solid var(--line); border-radius:10px; margin-bottom:6px; }
+.rec-row .grow { flex:1; min-width:0; }
+.rec-row b { font-weight:600; }
+.rec-row span { color:var(--mute); margin-left:4px; }
+.rec-row small { display:block; color:var(--mute); font-size:12px; margin-top:3px; }
+.rec-row.live { border-color:#b3261e; box-shadow:inset 3px 0 0 #e0453a; }
+.rec-row.off { opacity:.55; }
+.rec-row .when { width:150px; flex:none; color:var(--accent); font-size:13px; font-variant-numeric:tabular-nums; }
+.rec .warn { color:#f0a35a; font-style:normal; }
+.rec-mark { font-size:12px; color:#ddd; margin-top:6px; display:flex; align-items:center; gap:6px; }
+button.small { padding:3px 8px; font-size:12px; }
+.rec-dir { margin-top:18px; }
+.rec-dir a { color:var(--accent); cursor:pointer; margin-left:6px; }

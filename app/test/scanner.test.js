@@ -15,6 +15,7 @@ const cases = [
   [p('Doctor.Who.2005.S01E01.Rose.mkv'), { kind: 'episode', show: 'Doctor Who', year: 2005, season: 1, episode: 1, epTitle: 'Rose' }],
   [p('Demo.Show.S01E01.720p.mkv'), { kind: 'episode', show: 'Demo Show', season: 1, episode: 1, episodeEnd: null, epTitle: '' }],
   [p('Show.S02E03E04.mkv'), { kind: 'episode', season: 2, episode: 3, episodeEnd: 4 }],
+  [p('Малкълм', 'Малкълм - S01E07 - 12 ное 2026 13ч00.mp4'), { kind: 'episode', show: 'Малкълм', season: 1, episode: 7, epTitle: '12 ное 2026 13ч00' }],
 ];
 let fail = 0;
 for (const [file, exp] of cases) {
