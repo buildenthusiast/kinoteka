@@ -13,6 +13,8 @@ const epg = require('./lib/epg');
 const subsync = require('./lib/subsync');
 const radio = require('./lib/radio');
 const recorder = require('./lib/recorder');
+const stremio = require('./lib/stremio');
+const crypto = require('crypto');
 
 let win, server;
 const DATA = () => app.getPath('userData');
@@ -224,7 +226,63 @@ ipcMain.handle('progress:set', (_e, { id, pos, dur, done }) => {
   db.progress[id] = p; save();
   return p;
 });
+// ---- онлайн филми (добавки на Stremio) -----------------------------------
+// webItems: id "web:<хеш>" → { url, headers, title, subs: [{url, lang, label}] }
+const webItems = new Map();
+const isWeb = (id) => String(id || '').startsWith('web:');
+const webFile = (id) => { const w = webItems.get(id); return w ? w.url : null; };
+const LANGS3 = { bul: 'Български', eng: 'Английски', rus: 'Руски', ger: 'Немски', fre: 'Френски', spa: 'Испански', ita: 'Италиански', tur: 'Турски', gre: 'Гръцки', ell: 'Гръцки', srp: 'Сръбски', scc: 'Сръбски', mac: 'Македонски', rum: 'Румънски', ron: 'Румънски' };
+ipcMain.handle('stremio:addons', async () => {
+  await stremio.ensureDefaults(db, save);
+  return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) };
+});
+ipcMain.handle('stremio:add', async (_e, url) => {
+  try { await stremio.add(db, save, url); } catch (e) { return { error: e.message }; }
+  return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) };
+});
+ipcMain.handle('stremio:remove', (_e, url) => { stremio.remove(db, save, url); return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) }; });
+ipcMain.handle('stremio:defaults', async () => { await stremio.restoreDefaults(db, save); return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) }; });
+ipcMain.handle('stremio:refresh', async () => { await stremio.refreshManifests(db, save); return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) }; });
+ipcMain.handle('stremio:catalog', async (_e, q) => { try { return { metas: await stremio.catalog(db, q || {}) }; } catch (e) { return { error: e.message, metas: [] }; } });
+ipcMain.handle('stremio:meta', async (_e, q) => { try { return { meta: await stremio.meta(db, q || {}) }; } catch (e) { return { error: e.message }; } });
+ipcMain.handle('stremio:streams', async (_e, q) => { try { return await stremio.streams(db, q || {}); } catch (e) { return { error: e.message, results: [] }; } });
+// подготвя поток за плейъра: { url, headers, title, type, id (на видеото), subtitles }
+ipcMain.handle('stremio:prepare', async (_e, o) => {
+  if (!o || !/^https?:\/\//i.test(o.url || '')) return { error: 'Невалиден адрес.' };
+  const id = 'web:' + crypto.createHash('sha1').update(String(o.videoId || o.url)).digest('hex').slice(0, 16);
+  let subs = [];
+  if (o.type && o.videoId) { try { subs = await stremio.subtitles(db, { type: o.type, id: o.videoId }); } catch {} }
+  subs = [...(o.subtitles || []).map(s => ({ ...s, addon: 'Потокът' })), ...subs].filter(s => s && /^https?:\/\//i.test(s.url || ''));
+  // българските най-отгоре
+  const bg = (s) => /^(bul|bg)$/i.test(s.lang) ? 0 : 1;
+  subs.sort((a, b) => bg(a) - bg(b));
+  const seen = {};
+  subs = subs.slice(0, 60).map(s => { const l = LANGS3[(s.lang || '').toLowerCase()] || s.lang || 'Субтитри'; seen[l] = (seen[l] || 0) + 1; return { url: s.url, lang: /^(bul|bg)$/i.test(s.lang) ? 'bul' : s.lang, label: `${l} ${seen[l]}${s.addon ? ' · ' + s.addon : ''}` }; });
+  webItems.set(id, { url: o.url, headers: o.headers && typeof o.headers === 'object' ? o.headers : {}, forceStream: !!o.notWeb, title: String(o.title || ''), subs });
+  return { id };
+});
+
 ipcMain.handle('media:open', async (_e, id) => {
+  if (isWeb(id)) {
+    const w = webItems.get(id); if (!w) return null;
+    const isHls = /\.m3u8(\?|$)/i.test(w.url);
+    let info = isHls ? null : await media.probe(w.url, w.headers);
+    if (!info) info = { duration: 0, format: isHls ? 'hls' : '', video: {}, audio: [], subs: [], unknown: true };
+    const noHdr = !Object.keys(w.headers).length && !w.forceStream;
+    let pseudo = null;   // име, по което canPlayDirect познава контейнера
+    if (info.unknown) pseudo = /\.(mp4|m4v|webm)(\?|$)/i.test(w.url) ? 'x.mp4' : null;
+    else if (/mp4|mov/.test(info.format)) pseudo = 'x.mp4';
+    else if (/webm/.test(info.format) && info.video && ['vp8', 'vp9', 'av1'].includes(info.video.codec)) pseudo = 'x.webm';
+    const q = `k=${server.token}&id=${id}`;
+    return {
+      id, file: w.url, name: w.title, info, web: true,
+      hls: isHls && noHdr ? w.url : null,
+      direct: !!(noHdr && !isHls && pseudo && (info.unknown || media.canPlayDirect(pseudo, info))),
+      directUrl: w.url,
+      streamUrl: `${server.base}/stream?${q}`,
+      externalSubs: w.subs.map((s, i) => ({ i, label: s.label, lang: s.lang }))
+    };
+  }
   const file = index.files.get(id);
   if (!file) return null;
   const info = await media.probe(file);
@@ -244,6 +302,15 @@ ipcMain.handle('media:open', async (_e, id) => {
   };
 });
 ipcMain.handle('media:subs', async (_e, { id, kind, index: i }) => {
+  if (isWeb(id)) {
+    const w = webItems.get(id), s = w && kind === 'ext' && w.subs[i];
+    if (!s) return [];
+    try {
+      const r = await fetch(s.url); if (!r.ok) return [];
+      const text = media.decodeText(Buffer.from(await r.arrayBuffer()));
+      return /^\s*\[Script Info\]/i.test(text) ? media.parseAss(text) : media.parseSrtVtt(text);
+    } catch { return []; }
+  }
   const file = index.files.get(id);
   if (!file) return [];
   if (kind === 'ext') { const s = scanner.findExternalSubs(file)[i]; return s ? media.readExternalSubs(s.path) : []; }
@@ -306,6 +373,7 @@ function subItem(id) {
   return null;
 }
 ipcMain.handle('subs:search', async (_e, id) => {
+  if (isWeb(id)) return { error: 'Субтитрите за онлайн филмите идват от добавките (напр. OpenSubtitles v3).' };
   if (!db.settings.osKey) return { error: 'nokey' };
   const it = subItem(id); if (!it) return { error: 'Файлът не е намерен.' };
   try { return { results: await opensubs.search(db.settings, it) }; } catch (e) { return { error: e.message }; }
@@ -319,6 +387,7 @@ ipcMain.handle('subs:download', async (_e, { id, fileId }) => {
 });
 
 ipcMain.handle('subs:autosync', async (_e, { id, cues, audio }) => {
+  if (isWeb(id)) return { error: 'не работи за онлайн филми — използвай G / H' };
   const file = index.files.get(id);
   if (!file || !Array.isArray(cues)) return { error: 'Файлът не е намерен.' };
   try {
@@ -639,7 +708,7 @@ if (process.env.KINOTEKA_DATA) app.setPath('userData', process.env.KINOTEKA_DATA
 
 app.whenReady().then(async () => {
   load();
-  server = await media.startServer({ resolveFile: (id) => index.files.get(id), resolveImage: imageFor });
+  server = await media.startServer({ resolveFile: (id) => isWeb(id) ? webFile(id) : index.files.get(id), resolveImage: imageFor, resolveHeaders: (id) => (webItems.get(id) || {}).headers });
   Menu.setApplicationMenu(null);
   setupWtvRequests();
   win = new BrowserWindow({

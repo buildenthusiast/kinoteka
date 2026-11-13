@@ -30,6 +30,7 @@ async function refresh() {
   if (view.name === 'wtv' && $('#wtv-grid')) return;      // World TV не зависи от библиотеката — пазим търсачката
   if (view.name === 'radio' && $('#radio-grid')) return;
   if (view.name === 'rec' && $('#rec-page')) return;       // „Записи“ се обновява само
+  if ((view.name === 'online' || view.name === 'odetail') && $('#online-page')) return;
   render();
 }
 
@@ -193,7 +194,7 @@ document.addEventListener('change', async (e) => {
 
 function render() {
   renderProfileBtn();
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view.name || (view.name === 'detail' && b.dataset.view === (view.param.type === 'series' ? 'series' : 'movies'))));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view.name || (view.name === 'odetail' && b.dataset.view === 'online') || (view.name === 'detail' && b.dataset.view === (view.param.type === 'series' ? 'series' : 'movies'))));
   $('#top').style.display = ['home', 'movies', 'series', 'favs', 'watch'].includes(view.name) ? '' : 'none';
   syncGenreSelect();
   const v = $('#view');
@@ -202,7 +203,7 @@ function render() {
   v.innerHTML = ({ home: renderHome, movies: () => renderGrid('movies'), series: () => renderGrid('series'), detail: renderDetail, settings: renderSettings,
     favs: () => renderList('♥ Любими', byIds(lib.settings.favs), 'Натисни „♥ Любим“ в страницата на филм или сериал, за да го добавиш тук.'),
     watch: () => renderList('🕒 За гледане', byIds(lib.settings.watch), 'Натисни „🕒 За гледане“ в страницата на филм или сериал, за да го запазиш за по-късно.'),
-    stats: renderStats, wtv: () => renderWtv(), radio: () => renderRadio(), rec: () => renderRec() })[view.name]();
+    stats: renderStats, wtv: () => renderWtv(), radio: () => renderRadio(), rec: () => renderRec(), online: () => renderOnline(), odetail: () => renderOnline() })[view.name]();
   v.dataset.view = view.name + JSON.stringify(view.param || '');
   if (keepScroll) v.scrollTop = st;
 }
@@ -422,6 +423,7 @@ const video = $('#video');
 const P = { item: null, media: null, mode: 'direct', offset: 0, audio: 0, tx: false, dur: 0, cues: [], subSel: null, list: [], saveT: 0, nextTimer: null };
 
 function findItem(id) {
+  if (String(id).startsWith('web:')) return (typeof onlineFound === 'function' && onlineFound(id)) || null;
   const m = lib.movies.find(x => x.id === id);
   if (m) return { item: m, title: m.displayTitle, list: [] };
   for (const s of lib.series) {
@@ -436,7 +438,7 @@ function findItem(id) {
   return null;
 }
 
-function curTime() { return P.mode === 'direct' ? video.currentTime : P.offset + video.currentTime; }
+function curTime() { return P.mode !== 'stream' ? video.currentTime : P.offset + video.currentTime; }
 
 async function play(id, opts = {}) {
   const found = findItem(id);
@@ -489,13 +491,30 @@ async function play(id, opts = {}) {
   const p = prog(id);
   const start = opts.at != null ? opts.at : !opts.fromStart && p.pos > 20 && !p.done && p.pos < P.dur - 10 ? p.pos : 0;
   if (start) toast('Продължава от ' + fmt(start));
-  P.mode = media.direct && P.audio === 0 ? 'direct' : 'stream';
+  P.mode = media.hls && P.audio === 0 ? 'hls' : media.direct && P.audio === 0 ? 'direct' : 'stream';
   load(start);
   showControls();
 }
 
 function load(t) {
   $('#spinner').classList.remove('hidden');
+  if (P.hls) { try { P.hls.destroy(); } catch {} P.hls = null; }
+  if (P.mode === 'hls' && window.Hls && Hls.isSupported()) {
+    // онлайн HLS поток (.m3u8) — hls.js сам избира качеството
+    P.offset = 0;
+    const h = P.hls = new Hls({ startPosition: t || -1, maxBufferLength: 60, enableWorker: false });
+    h.on(Hls.Events.ERROR, (_e, d) => {
+      if (!d.fatal || P.hls !== h) return;
+      const at = video.currentTime || t || 0;
+      try { h.destroy(); } catch {} P.hls = null;
+      toast('Превключвам на резервен начин за пускане…');
+      P.mode = 'stream'; load(at);
+    });
+    h.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+    h.loadSource(P.media.hls); h.attachMedia(video);
+    return;
+  }
+  if (P.mode === 'hls') P.mode = 'stream';
   if (P.mode === 'direct') {
     P.offset = 0;
     video.src = P.media.directUrl;
@@ -509,7 +528,7 @@ function load(t) {
 
 function seek(t) {
   t = Math.max(0, Math.min(P.dur ? P.dur - 1 : t, t));
-  if (P.mode === 'direct') video.currentTime = t;
+  if (P.mode !== 'stream') video.currentTime = t;
   else load(t);
   renderSubs(t);
   updateUI();
@@ -518,11 +537,14 @@ function seek(t) {
 video.addEventListener('error', () => {
   if (!P.media || $('#player').classList.contains('hidden')) return;
   const t = curTime();
+  if (P.mode === 'hls') return;   // hls.js сам съобщава за грешките си
   if (P.mode === 'direct') { P.mode = 'stream'; return load(t); }
   if (!P.tx) { P.tx = true; toast('Прекодирам видеото за този файл…'); return load(t); }
   $('#spinner').classList.add('hidden');
   toast('Този файл не може да се пусне. ' + (video.error ? video.error.message : ''), 6000);
 });
+// онлайн видео без известна дължина (напр. HLS) — взимаме я от плейъра
+video.addEventListener('durationchange', () => { if (P.media && !P.dur && P.mode !== 'stream' && isFinite(video.duration) && video.duration > 0) P.dur = video.duration; });
 video.addEventListener('waiting', () => $('#spinner').classList.remove('hidden'));
 video.addEventListener('playing', () => $('#spinner').classList.add('hidden'));
 video.addEventListener('canplay', () => $('#spinner').classList.add('hidden'));
@@ -534,7 +556,7 @@ video.addEventListener('timeupdate', () => {
   if (Date.now() - P.saveT > 5000) saveProgress();
   // звук върви, но няма картина → кодекът не се поддържа, прекодираме
   if (P.media.info.video && video.currentTime > 1.5 && video.videoWidth === 0 && !P.tx) {
-    P.tx = true; if (P.mode === 'direct') P.mode = 'stream';
+    P.tx = true; if (P.mode !== 'stream') P.mode = 'stream';
     toast('Прекодирам видеото за този файл…'); return load(t);
   }
   tickStats();
@@ -675,6 +697,7 @@ function shiftSubs(d) {
 function closePlayer() {
   saveProgress(true);
   flushStats(); clearInterval(P.cdTimer);
+  if (P.hls) { try { P.hls.destroy(); } catch {} P.hls = null; }
   video.pause(); video.removeAttribute('src'); video.load();
   window.api.stop();
   window.api.fullscreen(false);
@@ -692,7 +715,7 @@ function updateUI() {
   $('#p-played').style.width = pc + '%';
   $('#p-handle').style.left = pc + '%';
   let b = 0;
-  try { if (video.buffered.length) b = (P.mode === 'direct' ? 0 : P.offset) + video.buffered.end(video.buffered.length - 1); } catch {}
+  try { if (video.buffered.length) b = (P.mode !== 'stream' ? 0 : P.offset) + video.buffered.end(video.buffered.length - 1); } catch {}
   $('#p-buffer').style.width = (d ? Math.min(100, b / d * 100) : 0) + '%';
   $('#p-mute').textContent = video.muted || video.volume === 0 ? '🔇' : '🔊';
 }
