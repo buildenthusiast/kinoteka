@@ -9,9 +9,10 @@
 // Официални добавки на Stremio, които идват с програмата. Няма торент добавки.
 const DEFAULT_ADDONS = [
   'https://v3-cinemeta.strem.io/manifest.json',      // каталози и информация за филми/сериали
-  'https://opensubtitles-v3.strem.io/manifest.json', // субтитри
-  'https://watchhub.strem.io/manifest.json'          // къде да гледаш законно (Netflix, HBO Max и др.)
+  'https://opensubtitles-v3.strem.io/manifest.json'  // субтитри
 ];
+// WatchHub беше стандартна в 0.8.0, но данните ѝ са само за клиенти с разрешение от Stremio — махаме я
+const DROPPED = ['https://watchhub.strem.io/manifest.json'];
 
 // stremio://… → https://…, добавя /manifest.json, ако липсва
 function normUrl(u) {
@@ -74,6 +75,7 @@ function state(db) {
 
 async function ensureDefaults(db, save) {
   const st = state(db);
+  if (st.addons.some(a => a.builtin && DROPPED.includes(a.url))) { st.addons = st.addons.filter(a => !(a.builtin && DROPPED.includes(a.url))); save(); }
   if (st.seeded) return;
   for (const url of DEFAULT_ADDONS) {
     if (st.addons.some(a => a.url === url)) continue;
