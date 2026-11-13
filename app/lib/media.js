@@ -18,10 +18,23 @@ function findBin(name) {
 const FFMPEG = findBin('ffmpeg');
 const FFPROBE = findBin('ffprobe');
 
-function probe(file) {
+const isUrl = (f) => /^https?:\/\//i.test(String(f || ''));
+// мрежови настройки на ffmpeg/ffprobe за онлайн видео (вкл. заглавки от добавката)
+function netArgs(file, headers) {
+  if (!isUrl(file)) return [];
+  const a = ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-rw_timeout', '20000000'];
+  const h = Object.assign({}, headers || {});
+  const ua = h['User-Agent'] || h['user-agent']; delete h['User-Agent']; delete h['user-agent'];
+  if (ua) a.push('-user_agent', String(ua));
+  const rest = Object.entries(h).filter(([k, v]) => /^[\w-]+$/.test(k) && !/[\r\n]/.test(String(v))).map(([k, v]) => `${k}: ${v}\r\n`).join('');
+  if (rest) a.push('-headers', rest);
+  return a;
+}
+
+function probe(file, headers) {
   return new Promise((resolve) => {
-    execFile(FFPROBE, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file],
-      { maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+    execFile(FFPROBE, ['-v', 'error', ...netArgs(file, headers), '-print_format', 'json', '-show_format', '-show_streams', file],
+      { maxBuffer: 20 * 1024 * 1024, windowsHide: true, timeout: isUrl(file) ? 45000 : 0 }, (err, stdout) => {
         if (err) return resolve(null);
         try {
           const j = JSON.parse(stdout);
@@ -135,7 +148,9 @@ function extractEmbeddedSubs(file, index) {
 
 // --- локален HTTP сървър за видео --------------------------------------
 // resolveFile(id) → абсолютен път или null (само файлове от библиотеката)
-function startServer({ resolveFile, resolveImage }) {
+// resolveHeaders(id) → заглавки за онлайн видео (по желание)
+function startServer({ resolveFile, resolveImage, resolveHeaders }) {
+  const probeCache = new Map();   // онлайн видео: не пробваме адреса при всяко превъртане
   const token = crypto.randomBytes(12).toString('hex');
   let active = null; // текущият ffmpeg процес
 
@@ -167,16 +182,20 @@ function startServer({ resolveFile, resolveImage }) {
         ff.on('close', () => { if (active === ff) active = null; res.end(); });
         return;
       }
-      const file = resolveFile(url.searchParams.get('id'));
-      if (!file || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }
+      const id = url.searchParams.get('id');
+      const file = resolveFile(id);
+      const remote = isUrl(file);
+      if (!file || (!remote && !fs.existsSync(file))) { res.writeHead(404); return res.end(); }
+      const headers = remote && resolveHeaders ? resolveHeaders(id) : null;
 
-      if (url.pathname === '/direct') return serveRange(file, req, res);
+      if (url.pathname === '/direct') { if (remote) { res.writeHead(404); return res.end(); } return serveRange(file, req, res); }
       if (url.pathname === '/stream') {
         const t = Math.max(0, parseFloat(url.searchParams.get('t')) || 0);
         const audio = parseInt(url.searchParams.get('a') || '0', 10) || 0;
         const force = url.searchParams.get('tx') === '1';
-        const info = await probe(file);
-        const args = buildStreamArgs(file, info, t, audio, force, findExternalAudio(file));
+        let info = remote ? probeCache.get(file) : null;
+        if (!info) { info = await probe(file, headers); if (remote && info) { probeCache.set(file, info); if (probeCache.size > 20) probeCache.delete(probeCache.keys().next().value); } }
+        const args = buildStreamArgs(file, info, t, audio, force, remote ? [] : findExternalAudio(file), headers);
         if (active) { try { active.kill('SIGKILL'); } catch {} }
         const ff = spawn(FFMPEG, args, { windowsHide: true });
         active = ff;
@@ -202,7 +221,7 @@ function startServer({ resolveFile, resolveImage }) {
   });
 }
 
-function buildStreamArgs(file, info, t, audioIdx, forceTranscode, extAudio = []) {
+function buildStreamArgs(file, info, t, audioIdx, forceTranscode, extAudio = [], headers = null) {
   const v = info && info.video;
   const nEmb = info ? info.audio.length : 0;
   const ext = audioIdx >= nEmb ? extAudio[audioIdx - nEmb] : null;
@@ -211,7 +230,7 @@ function buildStreamArgs(file, info, t, audioIdx, forceTranscode, extAudio = [])
   const copyHevc = !forceTranscode && v && v.codec === 'hevc'; // Windows с хардуерно декодиране; при грешка плейърът минава на прекодиране
   const args = ['-v', 'error', '-nostdin'];
   if (t > 0) args.push('-ss', t.toFixed(3));
-  args.push('-i', file);
+  args.push(...netArgs(file, headers), '-i', file);
   if (ext) { if (t > 0) args.push('-ss', t.toFixed(3)); args.push('-i', ext.path); }
   args.push('-map', '0:v:0?');
   if (ext) args.push('-map', '1:a:0');
@@ -262,4 +281,4 @@ function serveRange(file, req, res) {
   }
 }
 
-module.exports = { probe, canPlayDirect, thumbnail, readExternalSubs, extractEmbeddedSubs, startServer, buildStreamArgs, buildLiveArgs, parseSrtVtt, decodeText, FFMPEG, FFPROBE };
+module.exports = { isUrl, netArgs, parseAss, probe, canPlayDirect, thumbnail, readExternalSubs, extractEmbeddedSubs, startServer, buildStreamArgs, buildLiveArgs, parseSrtVtt, decodeText, FFMPEG, FFPROBE };
