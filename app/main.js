@@ -234,15 +234,15 @@ const webFile = (id) => { const w = webItems.get(id); return w ? w.url : null; }
 const LANGS3 = { bul: 'Български', eng: 'Английски', rus: 'Руски', ger: 'Немски', fre: 'Френски', spa: 'Испански', ita: 'Италиански', tur: 'Турски', gre: 'Гръцки', ell: 'Гръцки', srp: 'Сръбски', scc: 'Сръбски', mac: 'Македонски', rum: 'Румънски', ron: 'Румънски' };
 ipcMain.handle('stremio:addons', async () => {
   await stremio.ensureDefaults(db, save);
-  return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) };
+  return { addons: stremio.all(db).map(stremio.summary), catalogs: stremio.catalogs(db) };
 });
 ipcMain.handle('stremio:add', async (_e, url) => {
   try { await stremio.add(db, save, url); } catch (e) { return { error: e.message }; }
-  return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) };
+  return { addons: stremio.all(db).map(stremio.summary), catalogs: stremio.catalogs(db) };
 });
-ipcMain.handle('stremio:remove', (_e, url) => { stremio.remove(db, save, url); return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) }; });
-ipcMain.handle('stremio:defaults', async () => { await stremio.restoreDefaults(db, save); return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) }; });
-ipcMain.handle('stremio:refresh', async () => { await stremio.refreshManifests(db, save); return { addons: stremio.state(db).addons.map(stremio.summary), catalogs: stremio.catalogs(db) }; });
+ipcMain.handle('stremio:remove', (_e, url) => { stremio.remove(db, save, url); return { addons: stremio.all(db).map(stremio.summary), catalogs: stremio.catalogs(db) }; });
+ipcMain.handle('stremio:defaults', async () => { await stremio.restoreDefaults(db, save); return { addons: stremio.all(db).map(stremio.summary), catalogs: stremio.catalogs(db) }; });
+ipcMain.handle('stremio:refresh', async () => { await stremio.refreshManifests(db, save); return { addons: stremio.all(db).map(stremio.summary), catalogs: stremio.catalogs(db) }; });
 ipcMain.handle('stremio:catalog', async (_e, q) => { try { return { metas: await stremio.catalog(db, q || {}) }; } catch (e) { return { error: e.message, metas: [] }; } });
 ipcMain.handle('stremio:meta', async (_e, q) => { try { return { meta: await stremio.meta(db, q || {}) }; } catch (e) { return { error: e.message }; } });
 ipcMain.handle('stremio:streams', async (_e, q) => { try { return await stremio.streams(db, q || {}); } catch (e) { return { error: e.message, results: [] }; } });
