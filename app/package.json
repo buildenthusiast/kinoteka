@@ -1,7 +1,7 @@
 {
   "name": "kinoteka",
   "productName": "Kinoteka",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Видеоплейър с библиотека от филми и сериали",
   "main": "main.js",
   "scripts": {
