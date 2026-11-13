@@ -17,23 +17,63 @@ const DEF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KH
 const AD_URL = /(doubleclick\.net|googlesyndication|imasdk|dai\.google|fwmrm\.net|freewheel|springserve|innovid|tremorhub|spotx|adsrvr|unicornmedia|\/ads?\/|adbreak|ad_break|\/creatives?\/|[_\-/]ads?[_\-]\d|\/vast\/)/i;
 const MAX_AD = 15 * 60;      // „реклама“ по-дълга от 15 мин = счупени маркери, записваме
 
-function fetch(url, hdr, { range, timeout = 20000 } = {}, redirects = 5) {
+// Изтегля целия отговор. maxBytes пази от безкрайни потоци (жив MPEG-TS по HTTP
+// никога не свършва — без лимит четенето виси и трупа памет до прекъсване на връзката).
+// reqs (Set) — за да може stop() да прекъсне висяща заявка.
+function fetch(url, hdr, { range, timeout = 20000, maxBytes = 64 * 1024 * 1024, reqs } = {}, redirects = 5) {
   return new Promise((resolve, reject) => {
     const headers = { 'User-Agent': hdr.ua || DEF_UA };
     if (hdr.referrer) headers.Referer = hdr.referrer;
     if (range) headers.Range = range;
     const req = (url.startsWith('https:') ? https : http).get(url, { headers, timeout }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
-        res.resume(); return resolve(fetch(new URL(res.headers.location, url).href, hdr, { range, timeout }, redirects - 1));
+        res.resume(); done(); return resolve(fetch(new URL(res.headers.location, url).href, hdr, { range, timeout, maxBytes, reqs }, redirects - 1));
       }
-      if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => resolve({ buf: Buffer.concat(chunks), url }));
-      res.on('error', reject);
+      if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); done(); return reject(new Error('HTTP ' + res.statusCode)); }
+      const chunks = []; let n = 0;
+      res.on('data', c => { chunks.push(c); n += c.length; if (n > maxBytes) { done(); req.destroy(new Error('Отговорът е твърде голям.')); } });
+      res.on('end', () => { done(); resolve({ buf: Buffer.concat(chunks), url }); });
+      res.on('error', (e) => { done(); reject(e); });
     });
+    const done = () => { if (reqs) reqs.delete(req); };
+    if (reqs) reqs.add(req);
     req.on('timeout', () => req.destroy(new Error('timeout')));
-    req.on('error', reject);
+    req.on('error', (e) => { done(); reject(e); });
+  });
+}
+
+// Поглежда какво връща адресът, без да чете целия отговор:
+// { kind: 'm3u8', buf, url } за плейлиста или { kind: 'stream', url } за непрекъснат поток (напр. MPEG-TS).
+function sniff(url, hdr, reqs, redirects = 5) {
+  return new Promise((resolve, reject) => {
+    const headers = { 'User-Agent': hdr.ua || DEF_UA };
+    if (hdr.referrer) headers.Referer = hdr.referrer;
+    let settled = false;
+    const finish = (fn, v) => { if (settled) return; settled = true; clearTimeout(t); reqs && reqs.delete(req); fn(v); };
+    const req = (url.startsWith('https:') ? https : http).get(url, { headers, timeout: 20000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
+        res.resume(); req.destroy(); return finish(resolve, sniff(new URL(res.headers.location, url).href, hdr, reqs, redirects - 1));
+      }
+      if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); req.destroy(); return finish(reject, new Error('HTTP ' + res.statusCode)); }
+      const ctype = String(res.headers['content-type'] || '').toLowerCase();
+      const chunks = []; let n = 0, kind = null;
+      res.on('data', (c) => {
+        chunks.push(c); n += c.length;
+        if (kind === null && n >= 16) {
+          const head = Buffer.concat(chunks).subarray(0, 2048).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+          kind = head.startsWith('#EXTM3U') || /mpegurl/.test(ctype) ? 'm3u8' : 'stream';
+          if (kind === 'stream') { req.destroy(); finish(resolve, { kind, url }); }
+        }
+        if (kind === 'm3u8' && n > 8 * 1024 * 1024) { req.destroy(); finish(reject, new Error('Плейлистата е твърде голяма.')); }
+      });
+      res.on('end', () => finish(resolve, kind === 'stream' ? { kind, url } : { kind: 'm3u8', buf: Buffer.concat(chunks), url }));
+      res.on('error', (e) => finish(reject, e));
+    });
+    // поток, който праща много бавно (под 16 байта за 20 сек) — третираме като поток
+    const t = setTimeout(() => { req.destroy(); finish(reject, new Error('timeout')); }, 25000);
+    if (reqs) reqs.add(req);
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', (e) => finish(reject, e));
   });
 }
 
@@ -121,11 +161,15 @@ class Recording extends EventEmitter {
     this.cur = null;        // текущо парче { file, fd, ext, mapUri }
     this.recorded = 0; this.cutSecs = 0; this.cuts = 0; this.bytes = 0;
     this.stopped = false; this.mode = 'hls'; this.markers = false; this.error = '';
-    this.keys = new Map(); this.maps = new Map();
+    this.keys = new Map(); this.maps = new Map(); this.reqs = new Set();
     fs.mkdirSync(this.workDir, { recursive: true });
   }
   info() { return { recorded: this.recorded, cutSecs: this.cutSecs, cuts: this.cuts, bytes: this.bytes, mode: this.mode, markers: this.markers, error: this.error }; }
-  stop() { this.stopped = true; if (this.ff) { try { this.ff.stdin.write('q'); } catch {} setTimeout(() => { try { this.ff.kill(); } catch {} }, 8000); } if (this.wake) this.wake(); }
+  stop() {
+    this.stopped = true;
+    for (const q of this.reqs) { try { q.destroy(new Error('спрян')); } catch {} }
+    this.reqs.clear();
+    if (this.ff) { try { this.ff.stdin.write('q'); } catch {} setTimeout(() => { try { this.ff.kill(); } catch {} }, 8000); } if (this.wake) this.wake(); }
   done() { return this.stopped || Date.now() >= this.stopAt; }
   async wait(ms) { await new Promise(r => { this.wake = r; setTimeout(r, Math.max(0, Math.min(ms, this.stopAt - Date.now()))); }); this.wake = null; }
 
@@ -145,7 +189,7 @@ class Recording extends EventEmitter {
       this.cur = { file, fd: fs.openSync(file, 'w'), ext, secs: 0, mapUri: seg.map ? seg.map.uri + seg.map.range : '' };
       if (seg.map) {
         const k = seg.map.uri + seg.map.range;
-        if (!this.maps.has(k)) this.maps.set(k, await this.decrypt(seg, (await fetch(seg.map.uri, this.hdr, { range: seg.map.range || undefined })).buf, true));
+        if (!this.maps.has(k)) this.maps.set(k, await this.decrypt(seg, (await fetch(seg.map.uri, this.hdr, { range: seg.map.range || undefined, reqs: this.reqs })).buf, true));
         fs.writeSync(this.cur.fd, this.maps.get(k));
       }
     }
@@ -155,7 +199,7 @@ class Recording extends EventEmitter {
   async decrypt(seg, buf, isMap) {
     if (!seg.key || isMap) return buf;
     let k = this.keys.get(seg.key.uri);
-    if (!k) { k = (await fetch(seg.key.uri, this.hdr)).buf; this.keys.set(seg.key.uri, k); }
+    if (!k) { k = (await fetch(seg.key.uri, this.hdr, { reqs: this.reqs })).buf; this.keys.set(seg.key.uri, k); }
     let iv;
     if (seg.key.iv) iv = Buffer.from(seg.key.iv.replace(/^0x/i, '').padStart(32, '0'), 'hex');
     else { iv = Buffer.alloc(16); iv.writeUInt32BE(seg.seq >>> 0, 12); iv.writeUInt32BE(Math.floor(seg.seq / 2 ** 32), 8); }
@@ -165,23 +209,28 @@ class Recording extends EventEmitter {
 
   async run() {
     try {
-      const first = await this.retry(() => fetch(this.ch.url, this.hdr));
-      const text = first.buf.toString('utf8');
-      if (!text.includes('#EXTM3U')) return await this.runFfmpeg();
-      let media = first.url, mtext = text;
-      if (/#EXT-X-STREAM-INF/i.test(text)) {
-        const v = pickVariant(text, first.url);
-        if (!v || v.audio) return await this.runFfmpeg();
-        media = v.url; mtext = null;
-      }
-      if (/#EXT-X-KEY:[^\n]*METHOD=SAMPLE-AES/i.test(mtext || '')) return await this.runFfmpeg();
-      await this.runHls(media, mtext);
+      await this.record();
     } catch (e) {
-      this.error = e.message;
+      if (!this.stopped) this.error = e.message;
     } finally {
       this.closePart();
     }
-    return this.parts;
+    return this.parts;   // винаги масив (дори при грешка), за да се слепи каквото е записано
+  }
+  async record() {
+    const first = await this.retry(() => sniff(this.ch.url, this.hdr, this.reqs));
+    // непрекъснат поток (MPEG-TS по HTTP, напр. /play/... адреси) — записваме го направо
+    if (first.kind === 'stream') return this.runRaw(first.url);
+    const text = first.buf.toString('utf8');
+    if (!text.includes('#EXTM3U')) return this.runFfmpeg();
+    let media = first.url, mtext = text;
+    if (/#EXT-X-STREAM-INF/i.test(text)) {
+      const v = pickVariant(text, first.url);
+      if (!v || v.audio) return this.runFfmpeg();
+      media = v.url; mtext = null;
+    }
+    if (/#EXT-X-KEY:[^\n]*METHOD=SAMPLE-AES/i.test(mtext || '')) return this.runFfmpeg();
+    return this.runHls(media, mtext);
   }
   async retry(fn) {
     let wait = 2000;
@@ -197,7 +246,7 @@ class Recording extends EventEmitter {
     const state = { adBySeq: new Map() };
     let last = -1, inCut = false, adRun = 0;
     while (!this.done()) {
-      if (!text) text = (await this.retry(async () => { const r = await fetch(mediaUrl, this.hdr); mediaUrl = r.url; return r; })).buf.toString('utf8');
+      if (!text) text = (await this.retry(async () => { const r = await fetch(mediaUrl, this.hdr, { maxBytes: 8 * 1024 * 1024, reqs: this.reqs }); mediaUrl = r.url; return r; })).buf.toString('utf8');
       if (/#EXT-X-KEY:[^\n]*METHOD=SAMPLE-AES/i.test(text)) { this.closePart(); return this.runFfmpeg(); }
       const p = parseMedia(text, mediaUrl, state); text = null;
       if (p.markers) this.markers = true;
@@ -215,7 +264,7 @@ class Recording extends EventEmitter {
         }
         if (inCut) { inCut = false; this.closePart(); }
         try {
-          const r = await fetch(seg.uri, this.hdr, { range: seg.range || undefined, timeout: 30000 });
+          const r = await fetch(seg.uri, this.hdr, { range: seg.range || undefined, timeout: 30000, reqs: this.reqs });
           await this.write(seg, await this.decrypt(seg, r.buf));
           this.error = '';
         } catch (e) { this.error = e.message; this.closePart(); }
@@ -224,6 +273,56 @@ class Recording extends EventEmitter {
       }
       if (p.ended) break;
       await this.wait(Math.min(6000, Math.max(1500, p.target * 500)));
+    }
+  }
+  // Непрекъснат поток (MPEG-TS по HTTP): байтовете отиват направо във файл.
+  // При прекъсване се свързваме отново и почваме ново парче.
+  async runRaw(url) {
+    this.mode = 'raw';
+    while (!this.done()) {
+      const file = path.join(this.workDir, `part${String(this.parts.length + 1).padStart(3, '0')}-${Date.now().toString(36)}.ts`);
+      const t0 = Date.now();
+      let size = 0;
+      await new Promise((resolve) => {
+        const out = fs.createWriteStream(file);
+        let req = null, timer = null, ended = false;
+        const end = (err) => {
+          if (ended) return; ended = true;
+          clearInterval(timer); this.reqs.delete(req);
+          if (err && !this.stopped) this.error = err.message;
+          try { req.destroy(); } catch {}
+          out.end(() => resolve());
+        };
+        const get = (u, redirects) => {
+          const headers = { 'User-Agent': this.hdr.ua || DEF_UA };
+          if (this.hdr.referrer) headers.Referer = this.hdr.referrer;
+          req = (u.startsWith('https:') ? https : http).get(u, { headers, timeout: 30000 }, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
+              res.resume(); this.reqs.delete(req); return get(new URL(res.headers.location, u).href, redirects - 1);
+            }
+            if (res.statusCode !== 200 && res.statusCode !== 206) { res.resume(); return end(new Error('HTTP ' + res.statusCode)); }
+            res.on('data', (c) => { if (ended) return; size += c.length; this.bytes += c.length; if (!out.write(c)) { res.pause(); out.once('drain', () => res.resume()); } });
+            res.on('end', () => end(new Error('Потокът прекъсна.')));
+            res.on('error', end);
+          });
+          this.reqs.add(req);
+          req.on('timeout', () => req.destroy(new Error('timeout')));
+          req.on('error', end);
+        };
+        out.on('error', end);
+        timer = setInterval(() => {
+          this.recorded = this.parts.reduce((a, p) => a + p.secs, 0) + (size > 0 ? (Date.now() - t0) / 1000 : 0);
+          if (size > 0) this.error = '';
+          this.emit('progress');
+          if (this.done()) end();
+        }, 2000);
+        get(url, 5);
+      });
+      const secs = (Date.now() - t0) / 1000;
+      if (size > 50000) this.parts.push({ file, secs }); else { try { fs.unlinkSync(file); } catch {} }
+      this.recorded = this.parts.reduce((a, p) => a + p.secs, 0);
+      this.emit('progress');
+      if (!this.done()) await this.wait(3000);
     }
   }
   // запис изцяло през ffmpeg (без рязане на реклами)
