@@ -217,7 +217,12 @@ async function oPlay(s) {
   const title = v && v.episode != null ? `${m.name} — S${String(v.season ?? 0).padStart(2, '0')}E${String(v.episode).padStart(2, '0')}${v.title ? ' · ' + v.title : ''}` : m.name;
   toast('Отварям видеото…');
   const r = await window.api.stPrepare({ url: s.url, headers: s.headers, notWeb: s.notWeb, subtitles: s.subtitles, type: d.type, videoId: O.video, title });
-  if (r.error) return toast(r.error);
+  if (r.error) return toast(r.error, 6000);
+  if (r.external) {   // адресът е уеб страница, а не видео
+    if (!/^https:\/\//i.test(r.external)) return toast('Това е уеб страница, а не видео — не мога да я пусна.', 6000);
+    toast('Това е уеб страница, а не видео — отварям я в браузъра.', 5000);
+    return window.api.openExternal(r.external);
+  }
   O.found.set(r.id, { item: { id: r.id, type: 'web' }, title, list: [] });
   play(r.id);
 }
@@ -243,7 +248,7 @@ document.addEventListener('click', async (ev) => {
   if (d.oseason !== undefined) { O.season = +d.oseason; return render(); }
   if (d.ovideo) { oLoadStreams(d.ovideo); return oMarkVideo(); }
   if (d.ostream !== undefined) { const s = O.flat && O.flat[+d.ostream]; if (s) oPlay(s); return; }
-  if (d.oext !== undefined) { const s = O.flat && O.flat[+d.oext]; if (s) window.api.openExternal(s.url); return; }
+  if (d.oext !== undefined) { ev.stopPropagation(); const s = O.flat && O.flat[+d.oext]; if (s) window.api.openExternal(s.url); return; }
   if (d.otrailer) return window.api.openExternal('https://www.youtube.com/watch?v=' + encodeURIComponent(d.otrailer));
   if (d.oremove) {
     const a = O.data.addons.find(x => x.url === d.oremove);

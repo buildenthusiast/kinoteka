@@ -541,6 +541,10 @@ video.addEventListener('error', () => {
   if (P.mode === 'direct') { P.mode = 'stream'; return load(t); }
   if (!P.tx) { P.tx = true; toast('Прекодирам видеото за този файл…'); return load(t); }
   $('#spinner').classList.add('hidden');
+  if (P.media.web) {   // онлайн: връщаме към списъка с източници
+    closePlayer();
+    return toast('Това видео не може да се пусне (адресът не е видео или е изтекъл). Пробвай друг източник.', 7000);
+  }
   toast('Този файл не може да се пусне. ' + (video.error ? video.error.message : ''), 6000);
 });
 // онлайн видео без известна дължина (напр. HLS) — взимаме я от плейъра
@@ -575,6 +579,10 @@ video.addEventListener('timeupdate', () => {
 });
 $('#p-skip').onclick = () => { if (P.intro && P.intro.intro) { P.introSkipped = true; seek(P.intro.intro[1]); } };
 video.addEventListener('ended', () => {
+  if (P.media && P.media.web && curTime() < 3) {   // онлайн „видео“, което свършва веднага — не е истинско видео
+    closePlayer();
+    return toast('Това видео не може да се пусне (адресът не е видео или е изтекъл). Пробвай друг източник.', 7000);
+  }
   saveProgress(true, true);
   if (sleep && sleep.mode === 'ep') return sleepStop();
   if (P.found.next && lib.settings.autoNext) return playNext();

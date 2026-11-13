@@ -249,6 +249,21 @@ ipcMain.handle('stremio:streams', async (_e, q) => { try { return await stremio.
 // подготвя поток за плейъра: { url, headers, title, type, id (на видеото), subtitles }
 ipcMain.handle('stremio:prepare', async (_e, o) => {
   if (!o || !/^https?:\/\//i.test(o.url || '')) return { error: 'Невалиден адрес.' };
+  // какво всъщност е адресът: уеб страница → браузъра, грешка → ясно съобщение
+  const hdr = o.headers && typeof o.headers === 'object' ? o.headers : {};
+  if (!/\.m3u8(\?|$)/i.test(o.url)) {
+    const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 10000);
+    try {
+      const r = await fetch(o.url, { headers: { ...hdr, Range: 'bytes=0-0' }, signal: ctl.signal, redirect: 'follow' });
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      try { r.body && r.body.cancel(); } catch {}
+      if (r.status >= 400) return { error: `Видеото не е достъпно (сървърът върна грешка ${r.status}). Пробвай друг източник.` };
+      if (/text\/html|application\/xhtml/.test(ct)) return { external: r.url || o.url };
+    } catch (e) {
+      if (e.name === 'AbortError') return { error: 'Сървърът на видеото не отговаря. Пробвай друг източник.' };
+      return { error: 'Не мога да се свържа със сървъра на видеото. Пробвай друг източник.' };
+    } finally { clearTimeout(tm); }
+  }
   const id = 'web:' + crypto.createHash('sha1').update(String(o.videoId || o.url)).digest('hex').slice(0, 16);
   let subs = [];
   if (o.type && o.videoId) { try { subs = await stremio.subtitles(db, { type: o.type, id: o.videoId }); } catch {} }
@@ -258,7 +273,7 @@ ipcMain.handle('stremio:prepare', async (_e, o) => {
   subs.sort((a, b) => bg(a) - bg(b));
   const seen = {};
   subs = subs.slice(0, 60).map(s => { const l = LANGS3[(s.lang || '').toLowerCase()] || s.lang || 'Субтитри'; seen[l] = (seen[l] || 0) + 1; return { url: s.url, lang: /^(bul|bg)$/i.test(s.lang) ? 'bul' : s.lang, label: `${l} ${seen[l]}${s.addon ? ' · ' + s.addon : ''}` }; });
-  webItems.set(id, { url: o.url, headers: o.headers && typeof o.headers === 'object' ? o.headers : {}, forceStream: !!o.notWeb, title: String(o.title || ''), subs });
+  webItems.set(id, { url: o.url, headers: hdr, forceStream: !!o.notWeb, title: String(o.title || ''), subs });
   return { id };
 });
 
