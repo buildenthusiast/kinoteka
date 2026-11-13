@@ -123,10 +123,14 @@ function oAddonsHtml() {
       <div class="o-logo">${a.logo ? `<img src="${esc(a.logo)}" referrerpolicy="no-referrer" data-fallback="remove">` : '🧩'}</div>
       <div class="grow"><div class="o-name">${esc(a.name)} <small>${esc(a.version || '')}${a.builtin ? ' · стандартна' : ''}</small></div>
         <div class="o-desc">${esc(a.description)}</div>
+        ${a.status ? `<div class="o-desc o-status">${esc(a.status)}</div>` : ''}
         <div class="genres" style="margin:6px 0 0">${a.resources.map(r => `<span>${esc(ORES[r] || r)}</span>`).join('')}${a.p2p ? '<span class="warn">торент — видеото няма да тръгне</span>' : ''}</div></div>
-      <button data-oremove="${esc(a.url)}" title="Махни добавката">✕ Махни</button></div>`).join('');
+      ${a.site ? `<button data-osite="${esc(a.site)}" title="Отвори сайта на услугата">↗ Сайт</button>` : ''}
+      <button data-oremove="${esc(a.url)}" title="${a.local ? 'Скрий услугата (връща се с „Върни стандартните“)' : 'Махни добавката'}">✕ ${a.local ? 'Скрий' : 'Махни'}</button></div>`).join('');
   return `<button class="back" data-oact="browse">← Назад към каталога</button>
     <h2>🧩 Добавки</h2>
+    <div class="hint">Вградени са безплатните законни услуги с реклами <b>Plex</b>, <b>Pluto TV</b> и <b>Tubi</b> — без регистрация.
+      Програмата сама проверява кои от тях работят от България; недостъпните не показват каталог.</div>
     <div class="hint">Добавките са като в Stremio. Постави адреса на добавката (завършва на <b>manifest.json</b>, може и <b>stremio://…</b>) и натисни „Добави“.
       Пускат се видеа с директен адрес (http/https, вкл. .m3u8). Торент потоци не се поддържат и се показват като „не се поддържа“.
       Използвай само добавки със съдържание, което имаш право да гледаш.</div>
@@ -236,7 +240,7 @@ document.addEventListener('change', (ev) => {
   if (ev.target.id === 'o-genre') { O.genre[O.cat] = ev.target.value; O.results = null; oLoadCatalog(); }
 });
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-ometa],[data-oact],[data-oremove],[data-oseason],[data-ovideo],[data-ostream],[data-oext],[data-otrailer]');
+  const t = ev.target.closest('[data-ometa],[data-oact],[data-oremove],[data-osite],[data-oseason],[data-ovideo],[data-ostream],[data-oext],[data-otrailer]');
   if (!t || !t.closest('#view')) return;
   const d = t.dataset;
   if (d.ometa) { const [type, ...rest] = d.ometa.split('|'); return oOpen(type, rest.join('|')); }
@@ -244,11 +248,12 @@ document.addEventListener('click', async (ev) => {
   if (d.ovideo) { oLoadStreams(d.ovideo); return oMarkVideo(); }
   if (d.ostream !== undefined) { const s = O.flat && O.flat[+d.ostream]; if (s) oPlay(s); return; }
   if (d.oext !== undefined) { const s = O.flat && O.flat[+d.oext]; if (s) window.api.openExternal(s.url); return; }
+  if (d.osite) return window.api.openExternal(d.osite);
   if (d.otrailer) return window.api.openExternal('https://www.youtube.com/watch?v=' + encodeURIComponent(d.otrailer));
   if (d.oremove) {
     const a = O.data.addons.find(x => x.url === d.oremove);
     if (!a || !confirmInline(t)) return;
-    oSet(await window.api.stRemove(d.oremove)); toast(`Махнах „${a.name}“`); return render();
+    oSet(await window.api.stRemove(d.oremove)); toast(`${a.local ? 'Скрих' : 'Махнах'} „${a.name}“`); return render();
   }
   const act = d.oact;
   if (act === 'more') return oLoadCatalog(true);

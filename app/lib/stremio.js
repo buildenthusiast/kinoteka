@@ -66,14 +66,30 @@ function resUrl(manifestUrl, resource, type, id, extra) {
 }
 
 // ---- съхранение ----------------------------------------------------------
-// db.stremio = { addons: [{ url, manifest, builtin }], seeded: true }
+// db.stremio = { addons: [{ url, manifest, builtin }], seeded: true, offLocal: ['builtin:pluto', …] }
 function state(db) {
   if (!db.stremio) db.stremio = { addons: [] };
   return db.stremio;
 }
 
+// Вградени безплатни услуги (Pluto TV, Plex, Tubi) — държат се като добавки,
+// но отговарят от lib/freetv.js вместо по HTTP. url: 'builtin:<id>'.
+const freetv = require('./freetv');
+const isLocal = (url) => String(url).startsWith('builtin:');
+function all(db) {
+  const st = state(db), off = st.offLocal || [];
+  const locals = freetv.providers.filter(p => !off.includes('builtin:' + p.id)).map(p => ({ url: 'builtin:' + p.id, manifest: p.manifest(), builtin: true, local: p }));
+  return [...locals, ...st.addons];
+}
+// един ресурс (catalog / meta / stream / subtitles) от добавка — локална или по HTTP
+async function fetchRes(a, resource, type, id, extra, ms) {
+  if (a.local) return a.local.handle(resource, type, id, extra || {});
+  return getJson(resUrl(a.url, resource, type, id, extra), ms);
+}
+
 async function ensureDefaults(db, save) {
   const st = state(db);
+  await freetv.init();
   if (st.seeded) return;
   for (const url of DEFAULT_ADDONS) {
     if (st.addons.some(a => a.url === url)) continue;
@@ -84,6 +100,7 @@ async function ensureDefaults(db, save) {
 
 async function refreshManifests(db, save) {
   const st = state(db);
+  await freetv.init(true);
   await Promise.all(st.addons.map(async a => { try { a.manifest = await fetchManifest(a.url); } catch {} }));
   save();
 }
@@ -100,24 +117,25 @@ async function add(db, save, rawUrl) {
 
 function remove(db, save, url) {
   const st = state(db);
+  if (isLocal(url)) { st.offLocal = [...new Set([...(st.offLocal || []), url])]; save(); return; }
   st.addons = st.addons.filter(a => a.url !== url);
   st.seeded = true;
   save();
 }
 
-function restoreDefaults(db, save) { state(db).seeded = false; return ensureDefaults(db, save); }
+function restoreDefaults(db, save) { state(db).seeded = false; state(db).offLocal = []; return ensureDefaults(db, save); }
 
 const summary = (a) => {
   const m = a.manifest || {};
   const res = (m.resources || []).map(r => typeof r === 'string' ? r : r.name);
-  return { url: a.url, builtin: !!a.builtin, id: m.id, name: m.name || m.id, version: m.version, description: m.description || '', logo: m.logo || m.icon || '',
+  return { url: a.url, builtin: !!a.builtin, local: !!a.local, status: a.local && a.local.status ? a.local.status() : '', site: a.local ? a.local.site : '', id: m.id, name: m.name || m.id, version: m.version, description: m.description || '', logo: m.logo || m.icon || '',
     resources: res, types: m.types || [], catalogs: (m.catalogs || []).length, p2p: !!(m.behaviorHints && m.behaviorHints.p2p) };
 };
 
 // каталози за разглеждане (без тези, които искат задължителни данни без избор)
 function catalogs(db) {
   const out = [];
-  for (const a of state(db).addons) {
+  for (const a of all(db)) {
     const m = a.manifest; if (!m) continue;
     for (const c of m.catalogs || []) {
       const extra = c.extra || (c.extraSupported || []).map(name => ({ name, isRequired: (c.extraRequired || []).includes(name) }));
@@ -135,9 +153,9 @@ function catalogs(db) {
 }
 
 async function catalog(db, { addon, type, id, extra }) {
-  const a = state(db).addons.find(x => x.url === addon);
+  const a = all(db).find(x => x.url === addon);
   if (!a) throw new Error('Добавката не е намерена.');
-  const r = await getJson(resUrl(a.url, 'catalog', type, id, extra));
+  const r = await fetchRes(a, 'catalog', type, id, extra);
   return (r && Array.isArray(r.metas) ? r.metas : []).filter(m => m && m.id).map(cleanMeta);
 }
 
@@ -153,11 +171,11 @@ function cleanMeta(m) {
 }
 
 async function meta(db, { type, id, addon }) {
-  const list = state(db).addons.filter(a => a.manifest && supports(a.manifest, 'meta', type, id));
+  const list = all(db).filter(a => a.manifest && supports(a.manifest, 'meta', type, id));
   // първо добавката, от която дойде заглавието (ако дава meta), после останалите
   list.sort((x, y) => (y.url === addon) - (x.url === addon));
   for (const a of list) {
-    try { const r = await getJson(resUrl(a.url, 'meta', type, id)); if (r && r.meta) return cleanMeta(r.meta); } catch {}
+    try { const r = await fetchRes(a, 'meta', type, id); if (r && r.meta) return cleanMeta(r.meta); } catch {}
   }
   return null;
 }
@@ -176,10 +194,10 @@ function classify(s, addonName) {
 }
 
 async function streams(db, { type, id }) {
-  const list = state(db).addons.filter(a => a.manifest && supports(a.manifest, 'stream', type, id));
+  const list = all(db).filter(a => a.manifest && supports(a.manifest, 'stream', type, id));
   const res = await Promise.all(list.map(async a => {
     try {
-      const r = await getJson(resUrl(a.url, 'stream', type, id), 25000);
+      const r = await fetchRes(a, 'stream', type, id, null, 25000);
       return { addon: a.manifest.name, streams: (r && Array.isArray(r.streams) ? r.streams : []).map(s => classify(s, a.manifest.name)) };
     } catch (e) { return { addon: a.manifest.name, error: e.message, streams: [] }; }
   }));
@@ -187,14 +205,14 @@ async function streams(db, { type, id }) {
 }
 
 async function subtitles(db, { type, id }) {
-  const list = state(db).addons.filter(a => a.manifest && supports(a.manifest, 'subtitles', type, id));
+  const list = all(db).filter(a => a.manifest && supports(a.manifest, 'subtitles', type, id));
   const res = await Promise.all(list.map(async a => {
     try {
-      const r = await getJson(resUrl(a.url, 'subtitles', type, id), 15000);
+      const r = await fetchRes(a, 'subtitles', type, id, null, 15000);
       return (r && Array.isArray(r.subtitles) ? r.subtitles : []).filter(s => s && s.url && /^https?:\/\//i.test(s.url)).map(s => ({ url: s.url, lang: s.lang || '', addon: a.manifest.name }));
     } catch { return []; }
   }));
   return res.flat();
 }
 
-module.exports = { DEFAULT_ADDONS, normUrl, baseOf, supports, resUrl, classify, ensureDefaults, refreshManifests, add, remove, restoreDefaults, summary, catalogs, catalog, meta, streams, subtitles, state };
+module.exports = { all, DEFAULT_ADDONS, normUrl, baseOf, supports, resUrl, classify, ensureDefaults, refreshManifests, add, remove, restoreDefaults, summary, catalogs, catalog, meta, streams, subtitles, state };

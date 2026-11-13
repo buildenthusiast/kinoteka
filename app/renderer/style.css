@@ -309,6 +309,7 @@ button.small { padding:3px 8px; font-size:12px; }
 .o-name { font-weight:600; }
 .o-name small { color:var(--mute); font-weight:400; margin-left:6px; }
 .o-desc { color:var(--mute); font-size:12px; margin-top:2px; line-height:1.45; }
+.o-status { color:var(--accent, #e5a00d); }
 .genres span.warn { background:rgba(232,90,60,.25); color:#ffb4a4; }
 .o-streams { display:flex; flex-direction:column; gap:8px; max-width:900px; }
 .o-stream { display:flex; gap:14px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; }

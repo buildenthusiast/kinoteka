@@ -1,8 +1,9 @@
 {
- "version": "0.8.0",
- "notes": "Нов раздел „🍿 Онлайн филми“: каталози и видео от добавки на Stremio (без торенти)",
+ "version": "0.9.0",
+ "notes": "Онлайн филми: вградени Plex (безплатни филми, сериали и канали на живо), Pluto TV и Tubi",
  "files": {
   "lib/epg.js": "167a85b213057bc5316aedf4ca72456154e49e6b9bb6e931b1554bd6451e0580",
+  "lib/freetv.js": "71341e852b410ec697d9e8343757da24e8bee4dabd16ec77ebef8098dbbcc560",
   "lib/intro.js": "c6c927630f7bb612032fc290c26e240f05d57c93d1f40cf4117056f7ccd09cb6",
   "lib/media.js": "ec3afd2598b83f0cbf21ff148a33a4c9170133ecc10c005671342d553fc673f4",
   "lib/opensubs.js": "b1992ab8b9993242fa051fd8f578b748351da47bafd11b9cdd2bbc0920717768",
@@ -10,21 +11,21 @@
   "lib/radio.js": "ae098aba540b0f971ccb88f5698b53fe61cc488e063b800a4e31c7f2d9c79c17",
   "lib/recorder.js": "06d1757fe3706d16b5c04f37b64fc02f93f90e840545f619bb311ca6322546ac",
   "lib/scanner.js": "7d87470b6b2f2466ef80e1aee86d498724824cccde9172a173ce79e4052a9527",
-  "lib/stremio.js": "4579d5f9a204508381c60791af07201e840f93ec83906af4351a80644ab75d47",
+  "lib/stremio.js": "da78e35335fb5803c78bfb185575084cc8b56c09777f1254838b729fe2e8223d",
   "lib/subsync.js": "4e87ef55d0cb016d75c3cb8a8f31f2842bad7e053b8cb11cf24cc2b52959a120",
   "lib/tmdb.js": "587b3f2617b84263f3f1d7e5f40a0c00b008db72330d84443f00e7f28ca13651",
   "lib/updater.js": "35395b02d2fbc63d37f6e2bb9650f90f70a86740cb43bd1ab301cd838709c77b",
   "lib/worldtv.js": "87696dc9da684609d14e2858a533c5243a364f2f7db1f9a67c1e98cd27aab906",
-  "main.js": "100017c82f8d51c4b94e59798361f93e0f48303b7d0cc7e24d21ae9c53de926a",
-  "package.json": "72cd81a504438d2118f83776cd9f10c2c1534c7c2c25ea5c9a7b7f07fae32dea",
+  "main.js": "82b480e99049c6a96cf3ce89f8c38645167e37a33b47b8b58b7b1647d50c4bf3",
+  "package.json": "82eb98cd4b8a7f7d0b69e8cbf67a85ac81352d2d588ab92123d30db5f00f05ce",
   "preload.js": "6bc2d1fdbe622d1095d64e3b98502271822c0b65110253fe3b538c299be7c021",
   "renderer/app.js": "ca5638dc974619f4c59e39fa869551976fcf713b3d3cbc19eef5356205af4f6d",
   "renderer/hls.min.js": "cfc70cc9e9fc63d071919e087670abc760c8fd1bc889b88588026e4d22193bbe",
   "renderer/index.html": "5c79b927f6be11e50dd064655361c7f6cb477e72516fb36517fd086bec6a5105",
-  "renderer/online.js": "9a4917e8c2945b3e1d9543c8c6992d8c3a15ffa5ccf5521cf0b07fb6a0b09610",
+  "renderer/online.js": "6ce819dae2f0ed3c1bc976bd90ce86e2a499d359d2afd53665d6fae56da40ca7",
   "renderer/radio.js": "0e0254b4aad2b20af36256eaefd672298c2b600bd66a06ac7f1de9a24f80a8f2",
   "renderer/rec.js": "94dcd6d1af3618c04fc8b8d11ec5184e51ea30685915fc4e0f2b1292e9cc9cd0",
-  "renderer/style.css": "79e1306948abcbfe68278a0ea16aa28a2b09af09f9001969409a5c87faea068c",
+  "renderer/style.css": "78ec82bc65a18e27b20a12f966b2a741066920c3d1ee966ac15787daed59d5c6",
   "renderer/worldtv.js": "59810eb8150d2b75850a737551d208ca02896a8958e3dd5d0154892a0deb25fd"
  }
 }
